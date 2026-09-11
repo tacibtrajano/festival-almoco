@@ -1,0 +1,15 @@
+{
+  "name": "FESTIVAL DO RIO 2026 - CONTROLE ALIMENTAÇÃO",
+  "short_name": "FR2026 Almoço",
+  "description": "Controle de almoço da equipe do Festival do Rio 2026 via QR Code",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F7F5F0",
+  "theme_color": "#123C3E",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

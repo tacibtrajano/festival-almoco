@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover" />
+<title>FESTIVAL DO RIO 2026 - CONTROLE ALIMENTAÇÃO</title>
+<meta name="description" content="Controle de almoço da equipe do Festival do Rio 2026 via QR Code" />
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#123C3E" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="FR2026 Almoço" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+
+<!-- Tailwind -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          petrol: { DEFAULT: '#123C3E', light: '#1B5457', dark: '#0B2728' },
+          gold:   { DEFAULT: '#E8B923', light: '#F3D064', dark: '#B8900E' },
+          sand:   '#F7F5F0',
+          ok:     '#16A34A',
+          danger: '#DC2626'
+        },
+        fontFamily: {
+          sans: ['Inter', 'system-ui', 'sans-serif']
+        }
+      }
+    }
+  };
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- html5-qrcode (scanner de câmera) -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<!-- QRCode.js (geração de QR Code) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<!-- jsPDF + autotable (relatório em PDF) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+  html, body { font-family: 'Inter', system-ui, sans-serif; background: #F7F5F0; }
+  .tab-btn.active { color: #123C3E; border-color: #E8B923; }
+  .tab-btn { color: #6b7280; border-color: transparent; }
+  #reader video { border-radius: 0.75rem; }
+  #reader__scan_region img { display: none; }
+  .toast { animation: slideUp .25s ease-out; }
+  @keyframes slideUp { from { transform: translateY(12px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #d6d3cb; border-radius: 4px; }
+  .flash-green { animation: flashGreen 1s ease-out; }
+  .flash-red { animation: flashRed 1s ease-out; }
+  @keyframes flashGreen { 0% { background-color: rgba(22,163,74,.25) } 100% { background-color: transparent } }
+  @keyframes flashRed { 0% { background-color: rgba(220,38,38,.25) } 100% { background-color: transparent } }
+</style>
+</head>
+<body class="min-h-screen text-petrol-dark">
+
+<!-- ===================== TELA DE LOGIN ===================== -->
+<div id="loginScreen" class="min-h-screen flex items-center justify-center px-5">
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <div class="w-16 h-16 rounded-2xl bg-petrol mx-auto flex items-center justify-center mb-4 border-2 border-gold">
+        <span class="text-gold font-extrabold text-xl">FR26</span>
+      </div>
+      <h1 class="text-lg font-bold text-petrol leading-snug">FESTIVAL DO RIO 2026</h1>
+      <p class="text-sm text-gray-500 mt-1">Controle de Alimentação</p>
+    </div>
+    <form id="loginForm" class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+      <label for="passwordInput" class="block text-sm font-medium text-gray-700 mb-2">Senha de acesso</label>
+      <input id="passwordInput" type="password" required autocomplete="current-password"
+        class="w-full rounded-xl border border-gray-300 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold"
+        placeholder="Digite a senha" />
+      <p id="loginError" class="text-danger text-sm mt-2 hidden">Senha incorreta. Tente novamente.</p>
+      <button type="submit"
+        class="w-full mt-4 bg-petrol hover:bg-petrol-light text-white font-semibold py-3 rounded-xl transition-colors">
+        Entrar
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== APP (pós-login) ===================== -->
+<div id="app" class="hidden min-h-screen pb-24 md:pb-8">
+
+  <!-- Header -->
+  <header class="bg-petrol text-white sticky top-0 z-30 shadow-sm">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-lg bg-white/10 border border-gold flex items-center justify-center">
+          <span class="text-gold font-bold text-xs">FR26</span>
+        </div>
+        <div>
+          <p class="font-bold leading-tight text-sm md:text-base">FESTIVAL DO RIO 2026</p>
+          <p class="text-white/70 text-xs leading-tight">Controle de Alimentação</p>
+        </div>
+      </div>
+      <button id="logoutBtn" class="text-white/70 hover:text-white text-sm font-medium">Sair</button>
+    </div>
+    <!-- Tabs desktop -->
+    <nav class="hidden md:flex max-w-4xl mx-auto px-4 gap-6 border-t border-white/10">
+      <button data-tab="cadastro" class="tab-btn-d py-3 text-sm font-medium border-b-2 border-transparent text-white/70 hover:text-white">Cadastro de Funcionários</button>
+      <button data-tab="leitor" class="tab-btn-d py-3 text-sm font-medium border-b-2 border-transparent text-white/70 hover:text-white">Leitor & Almoço</button>
+      <button data-tab="historico" class="tab-btn-d py-3 text-sm font-medium border-b-2 border-transparent text-white/70 hover:text-white">Histórico</button>
+    </nav>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-5">
+
+    <!-- ================= ABA 1: CADASTRO ================= -->
+    <section id="tab-cadastro" class="tab-section">
+      <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-5">
+        <h2 class="font-bold text-petrol mb-4">Novo funcionário</h2>
+        <form id="formFuncionario" class="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Nome completo</label>
+            <input id="inputNome" type="text" required placeholder="Ex.: Maria da Silva"
+              class="w-full rounded-xl border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gold" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Setor</label>
+            <select id="inputSetor" required
+              class="w-full rounded-xl border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gold bg-white">
+              <option value="">Selecione…</option>
+              <option>Produção</option>
+              <option>Curadoria</option>
+              <option>Comunicação</option>
+              <option>Segurança</option>
+              <option>Limpeza</option>
+              <option>Bilheteria</option>
+              <option>Recepção</option>
+              <option>Técnica / Projeção</option>
+              <option>Transporte</option>
+              <option>Credenciamento</option>
+              <option>Coordenação</option>
+              <option>Voluntariado</option>
+              <option value="__outro__">Outro (especificar)</option>
+            </select>
+            <input id="inputSetorOutro" type="text" placeholder="Digite o setor"
+              class="hidden w-full mt-2 rounded-xl border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gold" />
+          </div>
+          <button type="submit"
+            class="bg-petrol hover:bg-petrol-light text-white font-semibold px-5 py-2.5 rounded-xl h-fit">
+            Cadastrar
+          </button>
+        </form>
+      </div>
+
+      <!-- QR gerado na hora -->
+      <div id="novoQrCard" class="hidden bg-white rounded-2xl border border-gold p-5 mb-5 text-center">
+        <p class="text-sm text-gray-600 mb-2">Funcionário cadastrado com sucesso</p>
+        <p id="novoQrNome" class="font-bold text-petrol mb-3"></p>
+        <div id="novoQrCanvas" class="flex justify-center mb-3"></div>
+        <button id="novoQrDownload" class="text-sm font-semibold text-petrol underline">Baixar QR Code</button>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-200 p-5">
+        <div class="flex items-center justify-between mb-3 gap-3">
+          <h2 class="font-bold text-petrol">Funcionários cadastrados</h2>
+          <input id="buscaFuncionario" type="text" placeholder="Buscar por nome…"
+            class="rounded-xl border border-gray-300 px-3 py-2 text-sm w-40 md:w-56 focus:outline-none focus:ring-2 focus:ring-gold" />
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-200">
+                <th class="py-2 pr-3">Nome</th>
+                <th class="py-2 pr-3">Setor</th>
+                <th class="py-2 pr-3 text-right">QR Code</th>
+              </tr>
+            </thead>
+            <tbody id="listaFuncionarios"></tbody>
+          </table>
+          <p id="listaFuncionariosVazia" class="hidden text-center text-gray-400 text-sm py-6">Nenhum funcionário encontrado.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ABA 2: LEITOR & ALMOÇO ================= -->
+    <section id="tab-leitor" class="tab-section hidden">
+      <button id="btnConvidado"
+        class="w-full mb-4 bg-gold hover:bg-gold-dark text-petrol-dark font-bold py-3 rounded-xl border border-gold-dark/20">
+        Gerar / Exibir QR Code de Convidado
+      </button>
+
+      <div class="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-bold text-petrol">Leitor de QR Code</h2>
+          <div class="flex gap-2">
+            <button id="btnStartScan" class="text-xs font-semibold bg-petrol text-white px-3 py-1.5 rounded-lg">Ligar câmera</button>
+            <button id="btnStopScan" class="hidden text-xs font-semibold bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg">Desligar</button>
+          </div>
+        </div>
+        <div id="reader" class="w-full max-w-sm mx-auto"></div>
+        <p class="text-xs text-gray-400 text-center mt-2">Aponte a câmera traseira para o QR Code do crachá.</p>
+      </div>
+
+      <div id="resultadoLeitura" class="hidden rounded-2xl border p-4 mb-4">
+        <p id="resultadoTitulo" class="font-bold text-lg"></p>
+        <p id="resultadoDetalhe" class="text-sm mt-1"></p>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-200 p-5 flex items-center justify-between gap-3">
+        <div>
+          <h2 class="font-bold text-petrol">Encerrar almoço do dia</h2>
+          <p class="text-xs text-gray-500 mt-0.5">Gera o PDF do dia e salva no histórico</p>
+        </div>
+        <button id="btnEncerrarDia"
+          class="bg-danger hover:opacity-90 text-white font-semibold px-4 py-2.5 rounded-xl whitespace-nowrap">
+          Encerrar almoço do dia
+        </button>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-200 p-5 mt-4">
+        <h2 class="font-bold text-petrol mb-3">Registros de hoje (<span id="dataHojeLabel"></span>)</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-gray-500 border-b border-gray-200">
+                <th class="py-2 pr-3">Nome</th>
+                <th class="py-2 pr-3">Setor</th>
+                <th class="py-2 pr-3">Horário</th>
+              </tr>
+            </thead>
+            <tbody id="listaRegistrosHoje"></tbody>
+          </table>
+          <p id="listaRegistrosHojeVazia" class="hidden text-center text-gray-400 text-sm py-6">Nenhum almoço registrado ainda hoje.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ABA 3: HISTÓRICO ================= -->
+    <section id="tab-historico" class="tab-section hidden">
+      <div class="bg-white rounded-2xl border border-gray-200 p-5">
+        <h2 class="font-bold text-petrol mb-4">Relatórios em PDF</h2>
+        <div id="listaHistorico" class="space-y-3"></div>
+        <p id="listaHistoricoVazia" class="hidden text-center text-gray-400 text-sm py-6">Nenhum relatório gerado ainda.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Tabs mobile (bottom nav) -->
+  <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 flex z-30">
+    <button data-tab="cadastro" class="tab-btn flex-1 py-3 text-xs font-medium border-t-2">Cadastro</button>
+    <button data-tab="leitor" class="tab-btn flex-1 py-3 text-xs font-medium border-t-2">Leitor</button>
+    <button data-tab="historico" class="tab-btn flex-1 py-3 text-xs font-medium border-t-2">Histórico</button>
+  </nav>
+</div>
+
+<!-- Modal QR Convidado -->
+<div id="modalConvidado" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center px-5">
+  <div class="bg-white rounded-2xl p-6 max-w-xs w-full text-center">
+    <h3 class="font-bold text-petrol mb-1">QR Code de Convidado</h3>
+    <p class="text-xs text-gray-500 mb-4">Pode ser lido várias vezes no mesmo dia</p>
+    <div id="qrConvidadoCanvas" class="flex justify-center mb-4"></div>
+    <div class="flex gap-2">
+      <button id="btnDownloadConvidado" class="flex-1 bg-petrol text-white font-semibold py-2.5 rounded-xl text-sm">Baixar</button>
+      <button id="btnFecharConvidado" class="flex-1 bg-gray-100 text-gray-700 font-semibold py-2.5 rounded-xl text-sm">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toastContainer" class="fixed bottom-20 md:bottom-6 inset-x-0 flex flex-col items-center gap-2 z-50 pointer-events-none px-4"></div>
+
+<script>
+/* =========================================================================
+   CONFIGURAÇÃO — edite estes três valores antes de publicar o app
+   ========================================================================= */
+const CONFIG = {
+  SUPABASE_URL: "https://lzinjaepltmkyrzbpaht.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_UkjBKZPEKd0fKWRN6F-_zQ_i6rxgxkP",
+  ACCESS_PASSWORD: "festrio26almoço"
+};
+
+const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const CONVIDADO_CODE = "CONVIDADO_EXTRA_FR2026";
+
+/* =========================================================================
+   UTILITÁRIOS
+   ========================================================================= */
+function hojeISO() {
+  const d = new Date();
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function hojeBR() {
+  const [y,m,d] = hojeISO().split('-');
+  return `${d}/${m}/${y}`;
+}
+function horaAgora() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+function horaCurta(hora) { return (hora || '').slice(0,5); }
+function sanitizeFileName(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  const colors = { success: 'bg-ok', error: 'bg-danger', info: 'bg-petrol' };
+  el.className = `toast pointer-events-auto ${colors[type] || colors.info} text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg max-w-sm text-center`;
+  el.textContent = msg;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 3200);
+}
+function beep(type = 'success') {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    if (type === 'success') { o.frequency.value = 880; g.gain.value = 0.15; o.start(); setTimeout(() => { o.frequency.value = 1174; }, 90); }
+    else { o.frequency.value = 220; g.gain.value = 0.18; o.start(); setTimeout(() => { o.frequency.value = 180; }, 140); }
+    setTimeout(() => { o.stop(); ctx.close(); }, 260);
+  } catch (e) { /* áudio indisponível, ignora */ }
+}
+
+/* =========================================================================
+   AUTENTICAÇÃO
+   ========================================================================= */
+const loginScreen = document.getElementById('loginScreen');
+const appEl = document.getElementById('app');
+
+function checkSession() {
+  if (localStorage.getItem('fr2026_auth') === 'true') {
+    loginScreen.classList.add('hidden');
+    appEl.classList.remove('hidden');
+    boot();
+  }
+}
+document.getElementById('loginForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const val = document.getElementById('passwordInput').value;
+  if (val === CONFIG.ACCESS_PASSWORD) {
+    localStorage.setItem('fr2026_auth', 'true');
+    document.getElementById('loginError').classList.add('hidden');
+    loginScreen.classList.add('hidden');
+    appEl.classList.remove('hidden');
+    boot();
+  } else {
+    document.getElementById('loginError').classList.remove('hidden');
+  }
+});
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem('fr2026_auth');
+  location.reload();
+});
+
+/* =========================================================================
+   TABS
+   ========================================================================= */
+function setActiveTab(name) {
+  document.querySelectorAll('.tab-section').forEach(s => s.classList.add('hidden'));
+  document.getElementById('tab-' + name).classList.remove('hidden');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-btn-d').forEach(b => {
+    const isActive = b.dataset.tab === name;
+    b.classList.toggle('text-white', isActive);
+    b.classList.toggle('border-gold', isActive);
+    b.classList.toggle('text-white/70', !isActive);
+  });
+  if (name === 'leitor') refreshRegistrosHoje();
+  if (name === 'historico') refreshHistorico();
+  if (name === 'cadastro') refreshFuncionarios();
+}
+document.querySelectorAll('[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
+});
+
+let bootDone = false;
+function boot() {
+  if (bootDone) return;
+  bootDone = true;
+  document.getElementById('dataHojeLabel').textContent = hojeBR();
+  setActiveTab('cadastro');
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+
+/* =========================================================================
+   ABA 1 — CADASTRO DE FUNCIONÁRIOS
+   ========================================================================= */
+let funcionariosCache = [];
+
+document.getElementById('inputSetor').addEventListener('change', (e) => {
+  const outro = document.getElementById('inputSetorOutro');
+  if (e.target.value === '__outro__') { outro.classList.remove('hidden'); outro.required = true; outro.focus(); }
+  else { outro.classList.add('hidden'); outro.required = false; outro.value = ''; }
+});
+
+document.getElementById('formFuncionario').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const nome = document.getElementById('inputNome').value.trim();
+  const setorSel = document.getElementById('inputSetor').value;
+  const setor = setorSel === '__outro__' ? document.getElementById('inputSetorOutro').value.trim() : setorSel;
+  if (!nome || !setor) return;
+
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  submitBtn.disabled = true; submitBtn.textContent = 'Salvando…';
+
+  const { data, error } = await sb.from('funcionarios').insert({ nome_completo: nome, setor }).select().single();
+
+  submitBtn.disabled = false; submitBtn.textContent = 'Cadastrar';
+
+  if (error) { toast('Erro ao cadastrar: ' + error.message, 'error'); return; }
+
+  toast(`Funcionário "${nome}" cadastrado!`, 'success');
+  e.target.reset();
+  document.getElementById('inputSetorOutro').classList.add('hidden');
+
+  // Mostra QR recém-gerado
+  document.getElementById('novoQrNome').textContent = `${data.nome_completo} — ${data.setor}`;
+  const qrHolder = document.getElementById('novoQrCanvas');
+  qrHolder.innerHTML = '';
+  new QRCode(qrHolder, { text: data.id, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M });
+  document.getElementById('novoQrCard').classList.remove('hidden');
+  document.getElementById('novoQrDownload').onclick = () => downloadQrFromHolder(qrHolder, `QRCode_${sanitizeFileName(data.nome_completo)}.png`);
+
+  refreshFuncionarios();
+});
+
+function downloadQrFromHolder(holder, filename) {
+  const canvas = holder.querySelector('canvas');
+  const img = holder.querySelector('img');
+  const dataUrl = canvas ? canvas.toDataURL('image/png') : (img ? img.src : null);
+  if (!dataUrl) return;
+  const a = document.createElement('a');
+  a.href = dataUrl; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+async function refreshFuncionarios() {
+  const { data, error } = await sb.from('funcionarios').select('*').order('nome_completo', { ascending: true });
+  if (error) { toast('Erro ao carregar funcionários: ' + error.message, 'error'); return; }
+  funcionariosCache = data || [];
+  renderFuncionarios(funcionariosCache);
+}
+
+function renderFuncionarios(lista) {
+  const tbody = document.getElementById('listaFuncionarios');
+  const vazio = document.getElementById('listaFuncionariosVazia');
+  tbody.innerHTML = '';
+  vazio.classList.toggle('hidden', lista.length > 0);
+  lista.forEach(f => {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-gray-100';
+    tr.innerHTML = `
+      <td class="py-2 pr-3">${f.nome_completo}</td>
+      <td class="py-2 pr-3 text-gray-500">${f.setor}</td>
+      <td class="py-2 pr-3 text-right">
+        <button class="text-xs font-semibold text-petrol underline" data-id="${f.id}" data-nome="${encodeURIComponent(f.nome_completo)}">Baixar QR Code</button>
+      </td>`;
+    tr.querySelector('button').addEventListener('click', () => baixarQrFuncionario(f));
+    tbody.appendChild(tr);
+  });
+}
+
+function baixarQrFuncionario(f) {
+  const temp = document.createElement('div');
+  temp.style.position = 'fixed'; temp.style.left = '-9999px';
+  document.body.appendChild(temp);
+  new QRCode(temp, { text: f.id, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
+  setTimeout(() => {
+    downloadQrFromHolder(temp, `QRCode_${sanitizeFileName(f.nome_completo)}.png`);
+    temp.remove();
+  }, 120);
+}
+
+document.getElementById('buscaFuncionario').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  renderFuncionarios(funcionariosCache.filter(f => f.nome_completo.toLowerCase().includes(q)));
+});
+
+/* =========================================================================
+   ABA 2 — LEITOR DE QR CODE & CONTROLE DE ALMOÇO
+   ========================================================================= */
+
+// --- QR do convidado (modal) ---
+document.getElementById('btnConvidado').addEventListener('click', () => {
+  const holder = document.getElementById('qrConvidadoCanvas');
+  holder.innerHTML = '';
+  new QRCode(holder, { text: CONVIDADO_CODE, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  document.getElementById('modalConvidado').classList.remove('hidden');
+});
+document.getElementById('btnFecharConvidado').addEventListener('click', () => {
+  document.getElementById('modalConvidado').classList.add('hidden');
+});
+document.getElementById('btnDownloadConvidado').addEventListener('click', () => {
+  downloadQrFromHolder(document.getElementById('qrConvidadoCanvas'), 'QRCode_Convidado_Extra.png');
+});
+
+// --- Scanner ---
+let html5QrCode = null;
+let scanningLocked = false; // trava curta pra não disparar leituras repetidas do mesmo frame
+
+document.getElementById('btnStartScan').addEventListener('click', async () => {
+  try {
+    html5QrCode = new Html5Qrcode('reader');
+    await html5QrCode.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 240, height: 240 } },
+      onScanSuccess,
+      () => {} // erro de frame sem QR — ignora silenciosamente
+    );
+    document.getElementById('btnStartScan').classList.add('hidden');
+    document.getElementById('btnStopScan').classList.remove('hidden');
+  } catch (err) {
+    toast('Não foi possível acessar a câmera: ' + err, 'error');
+  }
+});
+document.getElementById('btnStopScan').addEventListener('click', async () => {
+  if (html5QrCode) { try { await html5QrCode.stop(); await html5QrCode.clear(); } catch (e) {} }
+  document.getElementById('btnStartScan').classList.remove('hidden');
+  document.getElementById('btnStopScan').classList.add('hidden');
+});
+
+async function onScanSuccess(decodedText) {
+  if (scanningLocked) return;
+  scanningLocked = true;
+  setTimeout(() => { scanningLocked = false; }, 2500); // evita múltiplas leituras do mesmo QR em sequência
+
+  if (decodedText === CONVIDADO_CODE) {
+    await registrarConvidado();
+  } else {
+    await registrarFuncionario(decodedText.trim());
+  }
+}
+
+async function registrarConvidado() {
+  const hora = horaAgora();
+  const { error } = await sb.from('registros_almoco').insert({
+    funcionario_id: null, nome_completo: 'Convidado Extra', setor: 'Extra',
+    tipo: 'convidado', data: hojeISO(), hora
+  });
+  if (error) { mostrarResultado(false, 'Erro ao registrar convidado', error.message); return; }
+  beep('success');
+  mostrarResultado(true, 'Sucesso! Almoço liberado para Convidado Extra', `Registrado às ${horaCurta(hora)}`);
+  refreshRegistrosHoje();
+}
+
+async function registrarFuncionario(id) {
+  const { data: func, error: errFunc } = await sb.from('funcionarios').select('*').eq('id', id).maybeSingle();
+  if (errFunc || !func) {
+    beep('error');
+    mostrarResultado(false, 'QR Code inválido', 'Este código não corresponde a nenhum funcionário cadastrado.');
+    return;
+  }
+
+  const { data: existente, error: errCheck } = await sb.from('registros_almoco')
+    .select('*').eq('funcionario_id', id).eq('data', hojeISO()).maybeSingle();
+
+  if (errCheck) { toast('Erro ao consultar: ' + errCheck.message, 'error'); return; }
+
+  if (existente) {
+    beep('error');
+    mostrarResultado(false, `ATENÇÃO: ${func.nome_completo} já almoçou hoje às ${horaCurta(existente.hora)}!`, 'Registro bloqueado — refeição já concedida.');
+    return;
+  }
+
+  const hora = horaAgora();
+  const { error: errInsert } = await sb.from('registros_almoco').insert({
+    funcionario_id: func.id, nome_completo: func.nome_completo, setor: func.setor,
+    tipo: 'funcionario', data: hojeISO(), hora
+  });
+  if (errInsert) { toast('Erro ao registrar: ' + errInsert.message, 'error'); return; }
+
+  beep('success');
+  mostrarResultado(true, `Sucesso! Almoço liberado para ${func.nome_completo}`, `${func.setor} — ${horaCurta(hora)}`);
+  refreshRegistrosHoje();
+}
+
+function mostrarResultado(sucesso, titulo, detalhe) {
+  const box = document.getElementById('resultadoLeitura');
+  box.classList.remove('hidden', 'flash-green', 'flash-red');
+  box.className = `rounded-2xl border p-4 mb-4 ${sucesso ? 'border-ok bg-ok/5 flash-green' : 'border-danger bg-danger/5 flash-red'}`;
+  document.getElementById('resultadoTitulo').className = `font-bold text-lg ${sucesso ? 'text-ok' : 'text-danger'}`;
+  document.getElementById('resultadoTitulo').textContent = titulo;
+  document.getElementById('resultadoDetalhe').className = `text-sm mt-1 ${sucesso ? 'text-ok' : 'text-danger'}`;
+  document.getElementById('resultadoDetalhe').textContent = detalhe;
+}
+
+async function refreshRegistrosHoje() {
+  document.getElementById('dataHojeLabel').textContent = hojeBR();
+  const { data, error } = await sb.from('registros_almoco').select('*').eq('data', hojeISO()).order('hora', { ascending: true });
+  if (error) { toast('Erro ao carregar registros: ' + error.message, 'error'); return; }
+  const tbody = document.getElementById('listaRegistrosHoje');
+  const vazio = document.getElementById('listaRegistrosHojeVazia');
+  tbody.innerHTML = '';
+  vazio.classList.toggle('hidden', (data || []).length > 0);
+  (data || []).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-gray-100';
+    tr.innerHTML = `<td class="py-2 pr-3">${r.nome_completo}</td><td class="py-2 pr-3 text-gray-500">${r.setor}</td><td class="py-2 pr-3">${horaCurta(r.hora)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// --- Encerrar almoço do dia (gera PDF + salva no histórico) ---
+document.getElementById('btnEncerrarDia').addEventListener('click', async () => {
+  const btn = document.getElementById('btnEncerrarDia');
+  btn.disabled = true; btn.textContent = 'Gerando PDF…';
+  try {
+    const { data: registros, error } = await sb.from('registros_almoco').select('*').eq('data', hojeISO()).order('hora', { ascending: true });
+    if (error) throw error;
+    if (!registros || registros.length === 0) { toast('Nenhum registro de almoço hoje ainda.', 'info'); return; }
+
+    const totalFuncionarios = registros.filter(r => r.tipo === 'funcionario').length;
+    const totalConvidados = registros.filter(r => r.tipo === 'convidado').length;
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text('FESTIVAL DO RIO 2026 - RELATÓRIO DE ALIMENTAÇÃO', 14, 18);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Data: ${hojeBR()}`, 14, 26);
+    doc.text(`Total de refeições servidas: ${registros.length}  (Funcionários: ${totalFuncionarios} | Convidados extras: ${totalConvidados})`, 14, 32);
+
+    doc.autoTable({
+      startY: 38,
+      head: [['Nº', 'Nome Completo', 'Setor', 'Horário']],
+      body: registros.map((r, i) => [i + 1, r.nome_completo, r.setor, horaCurta(r.hora)]),
+      headStyles: { fillColor: [18, 60, 62] },
+      styles: { fontSize: 9 }
+    });
+
+    const [y, m, d] = hojeISO().split('-');
+    const nomeArquivo = `FR2026 l Alimentação_${d}-${m}-${y}.pdf`;
+    const blob = doc.output('blob');
+
+    // Upload para o Supabase Storage
+    const path = `${hojeISO()}.pdf`;
+    const { error: errUpload } = await sb.storage.from('relatorios-pdf').upload(path, blob, { upsert: true, contentType: 'application/pdf' });
+    if (errUpload) throw errUpload;
+    const { data: urlData } = sb.storage.from('relatorios-pdf').getPublicUrl(path);
+
+    const { error: errSave } = await sb.from('relatorios').upsert({
+      data: hojeISO(), nome_arquivo: nomeArquivo, url: urlData.publicUrl,
+      total_funcionarios: totalFuncionarios, total_convidados: totalConvidados, total_geral: registros.length
+    }, { onConflict: 'data' });
+    if (errSave) throw errSave;
+
+    doc.save(nomeArquivo); // download local também
+    toast('PDF do dia gerado e salvo no histórico!', 'success');
+    refreshHistorico();
+  } catch (err) {
+    toast('Erro ao encerrar o dia: ' + (err.message || err), 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Encerrar almoço do dia';
+  }
+});
+
+/* =========================================================================
+   ABA 3 — HISTÓRICO
+   ========================================================================= */
+async function refreshHistorico() {
+  const { data, error } = await sb.from('relatorios').select('*').order('data', { ascending: false });
+  if (error) { toast('Erro ao carregar histórico: ' + error.message, 'error'); return; }
+  const container = document.getElementById('listaHistorico');
+  const vazio = document.getElementById('listaHistoricoVazia');
+  container.innerHTML = '';
+  vazio.classList.toggle('hidden', (data || []).length > 0);
+
+  (data || []).forEach(r => {
+    const [y, m, d] = r.data.split('-');
+    const item = document.createElement('div');
+    item.className = 'border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap';
+    item.innerHTML = `
+      <div>
+        <p class="font-semibold text-petrol text-sm">${d}/${m}/${y}</p>
+        <p class="text-xs text-gray-500">${r.total_geral} refeições — ${r.total_funcionarios} funcionários, ${r.total_convidados} convidados</p>
+      </div>
+      <div class="flex gap-2">
+        <a href="${r.url}" download="${r.nome_arquivo}" target="_blank" rel="noopener"
+          class="text-xs font-semibold bg-petrol text-white px-3 py-2 rounded-lg">Download PDF</a>
+        <button class="btn-share text-xs font-semibold bg-ok text-white px-3 py-2 rounded-lg">Compartilhar</button>
+      </div>`;
+    item.querySelector('.btn-share').addEventListener('click', () => compartilharRelatorio(r));
+    container.appendChild(item);
+  });
+}
+
+async function compartilharRelatorio(r) {
+  const texto = `FESTIVAL DO RIO 2026 - Relatório de Alimentação de ${r.data.split('-').reverse().join('/')}: ${r.url}`;
+  if (navigator.share) {
+    try { await navigator.share({ title: r.nome_arquivo, text: texto, url: r.url }); return; } catch (e) { /* usuário cancelou */ return; }
+  }
+  window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
+/* =========================================================================
+   INÍCIO
+   ========================================================================= */
+checkSession();
+</script>
+</body>
+</html>
