@@ -85,7 +85,40 @@
         class="w-full mt-4 bg-petrol hover:bg-petrol-light text-white font-semibold py-3 rounded-xl transition-colors">
         Entrar
       </button>
+      <button type="button" id="btnAbrirTrocaSenha" class="w-full mt-3 text-xs text-gray-500 hover:text-petrol underline">
+        Esqueceu ou quer trocar a senha de acesso?
+      </button>
     </form>
+  </div>
+</div>
+
+<!-- Modal Trocar senha de acesso -->
+<div id="modalTrocaSenha" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center px-5">
+  <div class="bg-white rounded-2xl p-6 max-w-xs w-full">
+    <h3 class="font-bold text-petrol mb-1">Trocar senha de acesso</h3>
+    <p class="text-xs text-gray-500 mb-4">Um link de confirmação será enviado para o e-mail cadastrado do administrador.</p>
+
+    <div id="trocaSenhaPasso1">
+      <button id="btnEnviarCodigo" class="w-full bg-petrol text-white font-semibold py-2.5 rounded-xl text-sm">Enviar link por e-mail</button>
+    </div>
+
+    <div id="trocaSenhaAguardando" class="hidden text-sm text-gray-600">
+      <p>Enviamos um link para o e-mail cadastrado.</p>
+      <p class="mt-2">Abra o e-mail <strong>nesse mesmo navegador</strong> e clique no link para continuar — esta janela vai atualizar sozinha.</p>
+    </div>
+
+    <div id="trocaSenhaPassoNovaSenha" class="hidden">
+      <p class="text-sm text-ok font-medium mb-3">E-mail confirmado! Defina a nova senha abaixo.</p>
+      <label class="block text-xs font-medium text-gray-600 mb-1">Nova senha de acesso</label>
+      <input id="inputNovaSenha" type="password" placeholder="Digite a nova senha"
+        class="w-full rounded-xl border border-gray-300 px-3 py-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-gold" />
+      <button id="btnConfirmarTrocaSenha" class="w-full bg-petrol text-white font-semibold py-2.5 rounded-xl text-sm">Confirmar e trocar senha</button>
+    </div>
+
+    <p id="trocaSenhaErro" class="text-danger text-xs mt-3 hidden"></p>
+    <p id="trocaSenhaSucesso" class="text-ok text-xs mt-3 hidden"></p>
+
+    <button id="btnFecharTrocaSenha" class="w-full mt-3 text-xs text-gray-400 underline">Fechar</button>
   </div>
 </div>
 
@@ -265,7 +298,9 @@
 const CONFIG = {
   SUPABASE_URL: "https://lzinjaepltmkyrzbpaht.supabase.co",
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx6aW5qYWVwbHRta3lyemJwYWh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwNzk5MzMsImV4cCI6MjEwNDY1NTkzM30.-6xlbrsoQfokPLi6HtKf-fDUSvmtTwf3bYJG_MuHqJM",
-  ACCESS_PASSWORD: "festrio26prod01"
+  ACCESS_PASSWORD: "festrio26prod01",
+  ADMIN_PASSWORD: "troque-esta-senha-de-admin",
+  ADMIN_EMAIL: "taci.btrajano@gmail.com"
 };
 
 const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -311,12 +346,27 @@ function beep(type = 'success') {
     setTimeout(() => { o.stop(); ctx.close(); }, 260);
   } catch (e) { /* áudio indisponível, ignora */ }
 }
+function confirmarSenhaAdmin() {
+  const senha = window.prompt('Digite a senha de administrador para confirmar esta ação:');
+  if (senha === null) return false; // cancelou
+  if (senha !== CONFIG.ADMIN_PASSWORD) { toast('Senha de administrador incorreta.', 'error'); return false; }
+  return true;
+}
 
 /* =========================================================================
    AUTENTICAÇÃO
    ========================================================================= */
 const loginScreen = document.getElementById('loginScreen');
 const appEl = document.getElementById('app');
+
+let senhaAcessoAtual = CONFIG.ACCESS_PASSWORD;
+async function carregarSenhaAtual() {
+  try {
+    const { data } = await sb.from('app_config').select('access_password').eq('id', 1).maybeSingle();
+    if (data && data.access_password) senhaAcessoAtual = data.access_password;
+  } catch (e) { /* sem internet ou erro — mantém a senha padrão como reserva */ }
+}
+carregarSenhaAtual();
 
 function checkSession() {
   if (localStorage.getItem('fr2026_auth') === 'true') {
@@ -325,10 +375,11 @@ function checkSession() {
     boot();
   }
 }
-document.getElementById('loginForm').addEventListener('submit', (e) => {
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const val = document.getElementById('passwordInput').value;
-  if (val === CONFIG.ACCESS_PASSWORD) {
+  await carregarSenhaAtual(); // garante checar contra a senha mais recente antes de decidir
+  if (val === senhaAcessoAtual) {
     localStorage.setItem('fr2026_auth', 'true');
     document.getElementById('loginError').classList.add('hidden');
     loginScreen.classList.add('hidden');
@@ -342,6 +393,84 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
   localStorage.removeItem('fr2026_auth');
   location.reload();
 });
+
+/* ---- Trocar senha de acesso (via link de confirmação enviado por e-mail) ---- */
+document.getElementById('btnAbrirTrocaSenha').addEventListener('click', () => {
+  document.getElementById('modalTrocaSenha').classList.remove('hidden');
+  document.getElementById('trocaSenhaPasso1').classList.remove('hidden');
+  document.getElementById('trocaSenhaAguardando').classList.add('hidden');
+  document.getElementById('trocaSenhaPassoNovaSenha').classList.add('hidden');
+  document.getElementById('trocaSenhaErro').classList.add('hidden');
+  document.getElementById('trocaSenhaSucesso').classList.add('hidden');
+});
+document.getElementById('btnFecharTrocaSenha').addEventListener('click', () => {
+  document.getElementById('modalTrocaSenha').classList.add('hidden');
+});
+
+document.getElementById('btnEnviarCodigo').addEventListener('click', async () => {
+  const btn = document.getElementById('btnEnviarCodigo');
+  const erroEl = document.getElementById('trocaSenhaErro');
+  erroEl.classList.add('hidden');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  const urlRetorno = window.location.origin + window.location.pathname + '?trocarSenha=1';
+  const { error } = await sb.auth.signInWithOtp({
+    email: CONFIG.ADMIN_EMAIL,
+    options: { shouldCreateUser: true, emailRedirectTo: urlRetorno }
+  });
+  btn.disabled = false; btn.textContent = 'Enviar link por e-mail';
+  if (error) { erroEl.textContent = 'Erro ao enviar e-mail: ' + error.message; erroEl.classList.remove('hidden'); return; }
+  document.getElementById('trocaSenhaPasso1').classList.add('hidden');
+  document.getElementById('trocaSenhaAguardando').classList.remove('hidden');
+});
+
+document.getElementById('btnConfirmarTrocaSenha').addEventListener('click', async () => {
+  const novaSenha = document.getElementById('inputNovaSenha').value;
+  const erroEl = document.getElementById('trocaSenhaErro');
+  const sucessoEl = document.getElementById('trocaSenhaSucesso');
+  erroEl.classList.add('hidden'); sucessoEl.classList.add('hidden');
+  if (!novaSenha) return;
+
+  const btn = document.getElementById('btnConfirmarTrocaSenha');
+  btn.disabled = true; btn.textContent = 'Salvando…';
+
+  const { error: errUpdate } = await sb.from('app_config').update({ access_password: novaSenha, atualizado_em: new Date().toISOString() }).eq('id', 1);
+  await sb.auth.signOut(); // não deixa sessão aberta no navegador
+
+  btn.disabled = false; btn.textContent = 'Confirmar e trocar senha';
+
+  if (errUpdate) {
+    erroEl.textContent = 'Erro ao salvar a nova senha: ' + errUpdate.message;
+    erroEl.classList.remove('hidden');
+    return;
+  }
+
+  senhaAcessoAtual = novaSenha;
+  sucessoEl.textContent = 'Senha alterada com sucesso!';
+  sucessoEl.classList.remove('hidden');
+  document.getElementById('inputNovaSenha').value = '';
+  setTimeout(() => { document.getElementById('modalTrocaSenha').classList.add('hidden'); }, 1800);
+});
+
+// Quando o usuário volta clicando no link do e-mail, o Supabase já autentica a sessão
+// automaticamente (via URL). Aqui só detectamos isso e pulamos direto para "definir nova senha".
+async function verificarRetornoTrocaSenha() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('trocarSenha') !== '1') return;
+  const { data: { session } } = await sb.auth.getSession();
+  document.getElementById('modalTrocaSenha').classList.remove('hidden');
+  document.getElementById('trocaSenhaErro').classList.add('hidden');
+  document.getElementById('trocaSenhaSucesso').classList.add('hidden');
+  if (session) {
+    document.getElementById('trocaSenhaPasso1').classList.add('hidden');
+    document.getElementById('trocaSenhaAguardando').classList.add('hidden');
+    document.getElementById('trocaSenhaPassoNovaSenha').classList.remove('hidden');
+  } else {
+    document.getElementById('trocaSenhaErro').textContent = 'Link inválido ou expirado. Peça um novo link.';
+    document.getElementById('trocaSenhaErro').classList.remove('hidden');
+  }
+  window.history.replaceState({}, document.title, window.location.pathname); // limpa a URL
+}
+verificarRetornoTrocaSenha();
 
 /* =========================================================================
    TABS
@@ -526,7 +655,7 @@ async function gerarCartaoQR(nome, setor, conteudoQr) {
 }
 
 async function refreshFuncionarios() {
-  const { data, error } = await sb.from('funcionarios').select('*').order('nome_completo', { ascending: true });
+  const { data, error } = await sb.from('funcionarios').select('*').eq('status', 'ativo').order('nome_completo', { ascending: true });
   if (error) { toast('Erro ao carregar funcionários: ' + error.message, 'error'); return; }
   funcionariosCache = data || [];
   renderFuncionarios(funcionariosCache);
@@ -543,17 +672,30 @@ function renderFuncionarios(lista) {
     tr.innerHTML = `
       <td class="py-2 pr-3">${f.nome_completo}</td>
       <td class="py-2 pr-3 text-gray-500">${f.setor}</td>
-      <td class="py-2 pr-3 text-right">
-        <button class="text-xs font-semibold text-petrol underline" data-id="${f.id}">Baixar QR Code</button>
+      <td class="py-2 pr-3 text-right whitespace-nowrap">
+        <button class="btn-baixar text-xs font-semibold text-petrol underline mr-3">Baixar QR Code</button>
+        <button class="btn-cancelar text-xs font-semibold text-danger underline">Cancelar</button>
       </td>`;
-    const btn = tr.querySelector('button');
-    btn.addEventListener('click', async () => {
-      btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = 'Gerando…';
+    const btnBaixar = tr.querySelector('.btn-baixar');
+    btnBaixar.addEventListener('click', async () => {
+      btnBaixar.disabled = true; const original = btnBaixar.textContent; btnBaixar.textContent = 'Gerando…';
       await baixarQrFuncionario(f);
-      btn.disabled = false; btn.textContent = textoOriginal;
+      btnBaixar.disabled = false; btnBaixar.textContent = original;
     });
+    tr.querySelector('.btn-cancelar').addEventListener('click', () => cancelarFuncionario(f));
     tbody.appendChild(tr);
   });
+}
+
+async function cancelarFuncionario(f) {
+  const confirmou = window.confirm(`Remover "${f.nome_completo}" da lista e cancelar o QR Code dessa pessoa?\n\nO QR Code impresso dela deixará de funcionar.`);
+  if (!confirmou) return;
+  if (!confirmarSenhaAdmin()) return;
+
+  const { error } = await sb.from('funcionarios').update({ status: 'cancelado' }).eq('id', f.id);
+  if (error) { toast('Erro ao cancelar: ' + error.message, 'error'); return; }
+  toast(`"${f.nome_completo}" removido e QR Code cancelado.`, 'success');
+  refreshFuncionarios();
 }
 
 async function baixarQrFuncionario(f) {
@@ -665,6 +807,12 @@ async function registrarFuncionario(id) {
     return;
   }
 
+  if (func.status === 'cancelado') {
+    beep('error');
+    mostrarResultado(false, 'QR CODE CANCELADO', `${func.nome_completo} — este QR Code não é mais válido.`, true);
+    return;
+  }
+
   const { data: existente, error: errCheck } = await sb.from('registros_almoco')
     .select('*').eq('funcionario_id', id).eq('data', hojeISO()).maybeSingle();
 
@@ -688,13 +836,13 @@ async function registrarFuncionario(id) {
   refreshRegistrosHoje();
 }
 
-function mostrarResultado(sucesso, titulo, detalhe) {
+function mostrarResultado(sucesso, titulo, detalhe, grande = false) {
   const box = document.getElementById('resultadoLeitura');
   box.classList.remove('hidden', 'flash-green', 'flash-red');
-  box.className = `rounded-2xl border p-4 mb-4 ${sucesso ? 'border-ok bg-ok/5 flash-green' : 'border-danger bg-danger/5 flash-red'}`;
-  document.getElementById('resultadoTitulo').className = `font-bold text-lg ${sucesso ? 'text-ok' : 'text-danger'}`;
+  box.className = `rounded-2xl border p-4 mb-4 text-center ${sucesso ? 'border-ok bg-ok/5 flash-green' : 'border-danger bg-danger/5 flash-red'} ${grande ? 'py-8' : ''}`;
+  document.getElementById('resultadoTitulo').className = `font-extrabold ${grande ? 'text-3xl' : 'text-lg'} ${sucesso ? 'text-ok' : 'text-danger'}`;
   document.getElementById('resultadoTitulo').textContent = titulo;
-  document.getElementById('resultadoDetalhe').className = `text-sm mt-1 ${sucesso ? 'text-ok' : 'text-danger'}`;
+  document.getElementById('resultadoDetalhe').className = `mt-1 ${grande ? 'text-base' : 'text-sm'} ${sucesso ? 'text-ok' : 'text-danger'}`;
   document.getElementById('resultadoDetalhe').textContent = detalhe;
   document.getElementById('btnContinuarScan').classList.remove('hidden');
   // Garante que a mensagem verde/vermelha fique visível na tela (importante no celular)
@@ -797,10 +945,26 @@ async function refreshHistorico() {
         <a href="${r.url}" download="${r.nome_arquivo}" target="_blank" rel="noopener"
           class="text-xs font-semibold bg-petrol text-white px-3 py-2 rounded-lg">Download PDF</a>
         <button class="btn-share text-xs font-semibold bg-ok text-white px-3 py-2 rounded-lg">Compartilhar</button>
+        <button class="btn-excluir text-xs font-semibold bg-danger text-white px-3 py-2 rounded-lg">Excluir</button>
       </div>`;
     item.querySelector('.btn-share').addEventListener('click', () => compartilharRelatorio(r));
+    item.querySelector('.btn-excluir').addEventListener('click', () => excluirRelatorio(r));
     container.appendChild(item);
   });
+}
+
+async function excluirRelatorio(r) {
+  const [y, m, d] = r.data.split('-');
+  const confirmou = window.confirm(`Excluir o relatório de ${d}/${m}/${y} do histórico? Esta ação não pode ser desfeita.`);
+  if (!confirmou) return;
+  if (!confirmarSenhaAdmin()) return;
+
+  const path = `${r.data}.pdf`;
+  await sb.storage.from('relatorios-pdf').remove([path]); // remove o arquivo do storage (se falhar, segue removendo o registro)
+  const { error } = await sb.from('relatorios').delete().eq('id', r.id);
+  if (error) { toast('Erro ao excluir: ' + error.message, 'error'); return; }
+  toast('Relatório excluído do histórico.', 'success');
+  refreshHistorico();
 }
 
 async function compartilharRelatorio(r) {
