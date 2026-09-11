@@ -357,6 +357,7 @@ function setActiveTab(name) {
     b.classList.toggle('text-white/70', !isActive);
   });
   if (name === 'leitor') refreshRegistrosHoje();
+  else desligarCamera();
   if (name === 'historico') refreshHistorico();
   if (name === 'cadastro') refreshFuncionarios();
 }
@@ -398,13 +399,23 @@ document.getElementById('formFuncionario').addEventListener('submit', async (e) 
   toast(`Funcionário "${nome}" cadastrado!`, 'success');
   e.target.reset();
 
-  // Mostra QR recém-gerado
+  // Mostra o cartão recém-gerado (com o QR Code) e prepara o download
   document.getElementById('novoQrNome').textContent = `${data.nome_completo} — ${data.setor}`;
   const qrHolder = document.getElementById('novoQrCanvas');
-  qrHolder.innerHTML = '';
-  new QRCode(qrHolder, { text: data.id, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M });
+  qrHolder.innerHTML = '<p class="text-xs text-gray-400">Gerando cartão…</p>';
   document.getElementById('novoQrCard').classList.remove('hidden');
-  document.getElementById('novoQrDownload').onclick = () => downloadQrFromHolder(qrHolder, `QRCode_${sanitizeFileName(data.nome_completo)}.png`);
+  const cartao = await gerarCartaoQR(data.nome_completo, data.setor, data.id);
+  qrHolder.innerHTML = '';
+  cartao.style.width = '220px';
+  cartao.style.borderRadius = '12px';
+  cartao.style.border = '1px solid #eee8dc';
+  qrHolder.appendChild(cartao);
+  document.getElementById('novoQrDownload').onclick = () => {
+    const a = document.createElement('a');
+    a.href = cartao.toDataURL('image/png');
+    a.download = `QRCode_${sanitizeFileName(data.nome_completo)}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
 
   refreshFuncionarios();
 });
@@ -417,6 +428,101 @@ function downloadQrFromHolder(holder, filename) {
   const a = document.createElement('a');
   a.href = dataUrl; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function textoCentralizadoComQuebra(ctx, texto, x, y, larguraMax, alturaLinha) {
+  const palavras = texto.split(' ');
+  const linhas = [];
+  let linhaAtual = '';
+  palavras.forEach(p => {
+    const teste = linhaAtual ? linhaAtual + ' ' + p : p;
+    if (ctx.measureText(teste).width > larguraMax && linhaAtual) { linhas.push(linhaAtual); linhaAtual = p; }
+    else linhaAtual = teste;
+  });
+  linhas.push(linhaAtual);
+  const inicioY = y - ((linhas.length - 1) * alturaLinha) / 2;
+  linhas.forEach((linha, i) => ctx.fillText(linha, x, inicioY + i * alturaLinha));
+  return linhas.length;
+}
+
+// Gera um cartão vertical (proporção de tela de celular) com o QR Code, pronto para imprimir/baixar
+async function gerarCartaoQR(nome, setor, conteudoQr) {
+  const W = 1080, H = 1920;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // fundo branco
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+
+  // selo do festival (mesmo estilo do ícone do app)
+  const iconSize = 150, iconX = (W - iconSize) / 2, iconY = 90;
+  ctx.fillStyle = '#123C3E';
+  roundRect(ctx, iconX, iconY, iconSize, iconSize, 30);
+  ctx.fill();
+  ctx.strokeStyle = '#E8B923'; ctx.lineWidth = 6;
+  roundRect(ctx, iconX, iconY, iconSize, iconSize, 30);
+  ctx.stroke();
+  ctx.fillStyle = '#E8B923';
+  ctx.font = 'bold 46px Inter, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('FR26', W / 2, iconY + iconSize / 2 + 4);
+
+  // título
+  ctx.fillStyle = '#123C3E';
+  ctx.font = 'bold 56px Inter, sans-serif';
+  ctx.fillText('FESTIVAL DO RIO 2026', W / 2, iconY + iconSize + 90);
+  ctx.fillStyle = '#9a958a';
+  ctx.font = '34px Inter, sans-serif';
+  ctx.fillText('Controle de Alimentação', W / 2, iconY + iconSize + 140);
+
+  // linha divisória
+  ctx.strokeStyle = '#eee8dc'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(90, 560); ctx.lineTo(W - 90, 560); ctx.stroke();
+
+  // Nome e setor
+  ctx.fillStyle = '#123C3E';
+  ctx.font = 'bold 58px Inter, sans-serif';
+  const linhasNome = textoCentralizadoComQuebra(ctx, nome, W / 2, 660, W - 160, 68);
+  ctx.fillStyle = '#8a8578';
+  ctx.font = '36px Inter, sans-serif';
+  ctx.fillText(setor, W / 2, 660 + linhasNome * 68 + 10);
+
+  // QR Code
+  const qrSize = 620;
+  const qrX = (W - qrSize) / 2, qrY = 900;
+  const temp = document.createElement('div');
+  temp.style.position = 'fixed'; temp.style.left = '-9999px';
+  document.body.appendChild(temp);
+  await new Promise(resolve => { new QRCode(temp, { text: conteudoQr, width: qrSize, height: qrSize, correctLevel: QRCode.CorrectLevel.M }); setTimeout(resolve, 150); });
+  const qrCanvasEl = temp.querySelector('canvas');
+  const qrImgEl = temp.querySelector('img');
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.strokeStyle = '#E8B923'; ctx.lineWidth = 4;
+  roundRect(ctx, qrX - 30, qrY - 30, qrSize + 60, qrSize + 60, 28);
+  ctx.fill(); ctx.stroke();
+  if (qrCanvasEl) ctx.drawImage(qrCanvasEl, qrX, qrY, qrSize, qrSize);
+  else if (qrImgEl) ctx.drawImage(qrImgEl, qrX, qrY, qrSize, qrSize);
+  temp.remove();
+
+  // rodapé
+  ctx.fillStyle = '#9a958a';
+  ctx.font = '30px Inter, sans-serif';
+  ctx.fillText('Apresente este QR Code no controle de almoço', W / 2, qrY + qrSize + 90);
+
+  return canvas;
 }
 
 async function refreshFuncionarios() {
@@ -438,22 +544,24 @@ function renderFuncionarios(lista) {
       <td class="py-2 pr-3">${f.nome_completo}</td>
       <td class="py-2 pr-3 text-gray-500">${f.setor}</td>
       <td class="py-2 pr-3 text-right">
-        <button class="text-xs font-semibold text-petrol underline" data-id="${f.id}" data-nome="${encodeURIComponent(f.nome_completo)}">Baixar QR Code</button>
+        <button class="text-xs font-semibold text-petrol underline" data-id="${f.id}">Baixar QR Code</button>
       </td>`;
-    tr.querySelector('button').addEventListener('click', () => baixarQrFuncionario(f));
+    const btn = tr.querySelector('button');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = 'Gerando…';
+      await baixarQrFuncionario(f);
+      btn.disabled = false; btn.textContent = textoOriginal;
+    });
     tbody.appendChild(tr);
   });
 }
 
-function baixarQrFuncionario(f) {
-  const temp = document.createElement('div');
-  temp.style.position = 'fixed'; temp.style.left = '-9999px';
-  document.body.appendChild(temp);
-  new QRCode(temp, { text: f.id, width: 300, height: 300, correctLevel: QRCode.CorrectLevel.M });
-  setTimeout(() => {
-    downloadQrFromHolder(temp, `QRCode_${sanitizeFileName(f.nome_completo)}.png`);
-    temp.remove();
-  }, 120);
+async function baixarQrFuncionario(f) {
+  const cartao = await gerarCartaoQR(f.nome_completo, f.setor, f.id);
+  const a = document.createElement('a');
+  a.href = cartao.toDataURL('image/png');
+  a.download = `QRCode_${sanitizeFileName(f.nome_completo)}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 document.getElementById('buscaFuncionario').addEventListener('input', (e) => {
@@ -481,38 +589,48 @@ document.getElementById('btnDownloadConvidado').addEventListener('click', () => 
 
 // --- Scanner ---
 let html5QrCode = null;
-let scanningLocked = false; // trava curta pra não disparar leituras repetidas do mesmo frame
+let cameraLigada = false;
+let scanningLocked = false; // trava lógica (não trava a câmera) pra não registrar 2x o mesmo QR
 
-document.getElementById('btnStartScan').addEventListener('click', async () => {
+async function ligarCamera() {
+  const btnIniciar = document.getElementById('btnStartScan');
+  btnIniciar.disabled = true; btnIniciar.textContent = 'Abrindo câmera…';
   try {
+    if (!html5QrCode) html5QrCode = new Html5Qrcode('reader');
     scanningLocked = false;
     document.getElementById('btnContinuarScan').classList.add('hidden');
     document.getElementById('resultadoLeitura').classList.add('hidden');
-    html5QrCode = new Html5Qrcode('reader');
     await html5QrCode.start(
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 240, height: 240 } },
       onScanSuccess,
       () => {} // erro de frame sem QR — ignora silenciosamente
     );
+    cameraLigada = true;
     document.getElementById('btnStartScan').classList.add('hidden');
     document.getElementById('btnStopScan').classList.remove('hidden');
   } catch (err) {
-    toast('Não foi possível acessar a câmera: ' + err, 'error');
+    toast('Não foi possível acessar a câmera. Verifique a permissão de câmera do navegador e tente novamente.', 'error');
+  } finally {
+    btnIniciar.disabled = false; btnIniciar.textContent = 'Ligar câmera';
   }
-});
-document.getElementById('btnStopScan').addEventListener('click', async () => {
-  if (html5QrCode) { try { await html5QrCode.stop(); await html5QrCode.clear(); } catch (e) {} }
+}
+
+async function desligarCamera() {
+  if (html5QrCode && cameraLigada) {
+    try { await html5QrCode.stop(); } catch (e) {}
+  }
+  cameraLigada = false;
   document.getElementById('btnStartScan').classList.remove('hidden');
   document.getElementById('btnStopScan').classList.add('hidden');
-});
+}
+
+document.getElementById('btnStartScan').addEventListener('click', ligarCamera);
+document.getElementById('btnStopScan').addEventListener('click', desligarCamera);
 
 async function onScanSuccess(decodedText) {
   if (scanningLocked) return;
-  scanningLocked = true;
-
-  // Pausa a câmera para não ficar relendo o mesmo QR Code em loop
-  if (html5QrCode) { try { html5QrCode.pause(true); } catch (e) {} }
+  scanningLocked = true; // ignora novas leituras até tocar em "Ler próximo QR Code" — câmera continua ligada e ao vivo
   document.getElementById('btnContinuarScan').classList.remove('hidden');
 
   if (decodedText === CONVIDADO_CODE) {
@@ -525,7 +643,6 @@ async function onScanSuccess(decodedText) {
 document.getElementById('btnContinuarScan').addEventListener('click', () => {
   scanningLocked = false;
   document.getElementById('btnContinuarScan').classList.add('hidden');
-  if (html5QrCode) { try { html5QrCode.resume(); } catch (e) {} }
 });
 
 async function registrarConvidado() {
@@ -537,8 +654,7 @@ async function registrarConvidado() {
   if (error) { mostrarResultado(false, 'Erro ao registrar convidado', error.message); return; }
   beep('success');
   mostrarResultado(true, 'Sucesso! Almoço liberado para Convidado Extra', `Registrado às ${horaCurta(hora)}`);
-  await refreshRegistrosHoje();
-  irParaListaDeHoje();
+  refreshRegistrosHoje();
 }
 
 async function registrarFuncionario(id) {
@@ -569,13 +685,7 @@ async function registrarFuncionario(id) {
 
   beep('success');
   mostrarResultado(true, `Sucesso! Almoço liberado para ${func.nome_completo}`, `${func.setor} — ${horaCurta(hora)}`);
-  await refreshRegistrosHoje();
-  irParaListaDeHoje();
-}
-
-function irParaListaDeHoje() {
-  // Rola a tela até a lista de registros de hoje para confirmar visualmente o nome incluído
-  document.getElementById('listaRegistrosHoje').closest('.bg-white').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  refreshRegistrosHoje();
 }
 
 function mostrarResultado(sucesso, titulo, detalhe) {
@@ -586,6 +696,9 @@ function mostrarResultado(sucesso, titulo, detalhe) {
   document.getElementById('resultadoTitulo').textContent = titulo;
   document.getElementById('resultadoDetalhe').className = `text-sm mt-1 ${sucesso ? 'text-ok' : 'text-danger'}`;
   document.getElementById('resultadoDetalhe').textContent = detalhe;
+  document.getElementById('btnContinuarScan').classList.remove('hidden');
+  // Garante que a mensagem verde/vermelha fique visível na tela (importante no celular)
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function refreshRegistrosHoje() {
