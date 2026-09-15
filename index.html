@@ -734,6 +734,8 @@ document.getElementById('buscaFuncionario').addEventListener('input', (e) => {
 let convidadoAtualCartao = null;
 
 document.getElementById('btnConvidado').addEventListener('click', async () => {
+  if (!confirmarSenhaAdmin()) return;
+
   const btn = document.getElementById('btnConvidado');
   btn.disabled = true; const original = btn.textContent; btn.textContent = 'Gerando…';
   const { data, error } = await sb.from('convidados').insert({}).select().single();
