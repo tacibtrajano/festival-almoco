@@ -731,26 +731,37 @@ document.getElementById('buscaFuncionario').addEventListener('input', (e) => {
    ========================================================================= */
 
 // --- QR do convidado (modal) — cada clique gera um convidado novo, com QR de uso único ---
-let convidadoAtualId = null;
+let convidadoAtualCartao = null;
 
 document.getElementById('btnConvidado').addEventListener('click', async () => {
   const btn = document.getElementById('btnConvidado');
   btn.disabled = true; const original = btn.textContent; btn.textContent = 'Gerando…';
   const { data, error } = await sb.from('convidados').insert({}).select().single();
-  btn.disabled = false; btn.textContent = original;
-  if (error) { toast('Erro ao gerar QR de convidado: ' + error.message, 'error'); return; }
+  if (error) { btn.disabled = false; btn.textContent = original; toast('Erro ao gerar QR de convidado: ' + error.message, 'error'); return; }
 
-  convidadoAtualId = data.id;
   const holder = document.getElementById('qrConvidadoCanvas');
-  holder.innerHTML = '';
-  new QRCode(holder, { text: CONVIDADO_PREFIXO + data.id, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  holder.innerHTML = '<p class="text-xs text-gray-400">Gerando cartão…</p>';
   document.getElementById('modalConvidado').classList.remove('hidden');
+
+  const cartao = await gerarCartaoQR('Convidado', `Gerado em ${hojeBR()}`, CONVIDADO_PREFIXO + data.id);
+  convidadoAtualCartao = cartao;
+  holder.innerHTML = '';
+  cartao.style.width = '220px';
+  cartao.style.borderRadius = '12px';
+  cartao.style.border = '1px solid #eee8dc';
+  holder.appendChild(cartao);
+
+  btn.disabled = false; btn.textContent = original;
 });
 document.getElementById('btnFecharConvidado').addEventListener('click', () => {
   document.getElementById('modalConvidado').classList.add('hidden');
 });
 document.getElementById('btnDownloadConvidado').addEventListener('click', () => {
-  downloadQrFromHolder(document.getElementById('qrConvidadoCanvas'), `QRCode_Convidado_${convidadoAtualId || ''}.png`);
+  if (!convidadoAtualCartao) return;
+  const a = document.createElement('a');
+  a.href = convidadoAtualCartao.toDataURL('image/png');
+  a.download = 'QRCode_Convidado.png';
+  document.body.appendChild(a); a.click(); a.remove();
 });
 
 // --- Scanner ---
