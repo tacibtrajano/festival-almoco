@@ -72,6 +72,9 @@
   <div class="absolute inset-0 bg-petrol-dark/80"></div>
   <div class="w-full max-w-sm relative z-10">
     <div class="text-center mb-8">
+      <div class="inline-flex bg-white rounded-xl px-4 py-2.5 mb-4 shadow">
+        <img src="logo.png" alt="Festival do Rio" class="h-10 w-auto" />
+      </div>
       <h1 class="text-xl font-bold text-white leading-snug drop-shadow">FESTIVAL DO RIO 2026</h1>
       <p class="text-sm text-gold mt-1">Controle de Alimentação</p>
     </div>
@@ -129,8 +132,8 @@
   <header class="bg-petrol text-white sticky top-0 z-30 shadow-sm">
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <div class="w-9 h-9 rounded-lg bg-white/10 border border-gold flex items-center justify-center">
-          <span class="text-gold font-bold text-xs">FR26</span>
+        <div class="h-9 px-2 rounded-lg bg-white flex items-center justify-center">
+          <img src="logo.png" alt="Festival do Rio" class="h-6 w-auto" />
         </div>
         <div>
           <p class="font-bold leading-tight text-sm md:text-base">FESTIVAL DO RIO 2026</p>
@@ -205,7 +208,7 @@
     <section id="tab-leitor" class="tab-section hidden">
       <button id="btnConvidado"
         class="w-full mb-4 bg-gold hover:bg-gold-dark text-petrol-dark font-bold py-3 rounded-xl border border-gold-dark/20">
-        Gerar / Exibir QR Code de Convidado
+        Gerar novo QR Code de Convidado
       </button>
 
       <div class="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
@@ -279,7 +282,7 @@
 <div id="modalConvidado" class="hidden fixed inset-0 bg-black/50 z-40 flex items-center justify-center px-5">
   <div class="bg-white rounded-2xl p-6 max-w-xs w-full text-center">
     <h3 class="font-bold text-petrol mb-1">QR Code de Convidado</h3>
-    <p class="text-xs text-gray-500 mb-4">Pode ser lido várias vezes no mesmo dia</p>
+    <p class="text-xs text-gray-500 mb-4">Válido para uma única entrada — perde a validade após ser lido</p>
     <div id="qrConvidadoCanvas" class="flex justify-center mb-4"></div>
     <div class="flex gap-2">
       <button id="btnDownloadConvidado" class="flex-1 bg-petrol text-white font-semibold py-2.5 rounded-xl text-sm">Baixar</button>
@@ -304,7 +307,7 @@ const CONFIG = {
 };
 
 const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-const CONVIDADO_CODE = "CONVIDADO_EXTRA_FR2026";
+const CONVIDADO_PREFIXO = "CONVIDADO_FR2026:";
 
 /* =========================================================================
    UTILITÁRIOS
@@ -559,6 +562,19 @@ function downloadQrFromHolder(holder, filename) {
   document.body.appendChild(a); a.click(); a.remove();
 }
 
+let logoImgPromise = null;
+function carregarLogoImg() {
+  if (!logoImgPromise) {
+    logoImgPromise = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = 'logo.png';
+    });
+  }
+  return logoImgPromise;
+}
+
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -595,26 +611,25 @@ async function gerarCartaoQR(nome, setor, conteudoQr) {
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, W, H);
 
-  // selo do festival (mesmo estilo do ícone do app)
-  const iconSize = 150, iconX = (W - iconSize) / 2, iconY = 90;
-  ctx.fillStyle = '#123C3E';
-  roundRect(ctx, iconX, iconY, iconSize, iconSize, 30);
-  ctx.fill();
-  ctx.strokeStyle = '#E8B923'; ctx.lineWidth = 6;
-  roundRect(ctx, iconX, iconY, iconSize, iconSize, 30);
-  ctx.stroke();
-  ctx.fillStyle = '#E8B923';
-  ctx.font = 'bold 46px Inter, sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('FR26', W / 2, iconY + iconSize / 2 + 4);
+  // logo oficial do festival
+  const logoImg = await carregarLogoImg();
+  const logoMaxW = 480;
+  let logoW = logoMaxW, logoH = 260;
+  if (logoImg) {
+    logoW = logoMaxW;
+    logoH = logoMaxW * (logoImg.naturalHeight / logoImg.naturalWidth);
+  }
+  const logoX = (W - logoW) / 2, logoY = 90;
+  if (logoImg) ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
 
   // título
   ctx.fillStyle = '#123C3E';
   ctx.font = 'bold 56px Inter, sans-serif';
-  ctx.fillText('FESTIVAL DO RIO 2026', W / 2, iconY + iconSize + 90);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('FESTIVAL DO RIO 2026', W / 2, logoY + logoH + 90);
   ctx.fillStyle = '#9a958a';
   ctx.font = '34px Inter, sans-serif';
-  ctx.fillText('Controle de Alimentação', W / 2, iconY + iconSize + 140);
+  ctx.fillText('Controle de Alimentação', W / 2, logoY + logoH + 140);
 
   // linha divisória
   ctx.strokeStyle = '#eee8dc'; ctx.lineWidth = 2;
@@ -715,18 +730,27 @@ document.getElementById('buscaFuncionario').addEventListener('input', (e) => {
    ABA 2 — LEITOR DE QR CODE & CONTROLE DE ALMOÇO
    ========================================================================= */
 
-// --- QR do convidado (modal) ---
-document.getElementById('btnConvidado').addEventListener('click', () => {
+// --- QR do convidado (modal) — cada clique gera um convidado novo, com QR de uso único ---
+let convidadoAtualId = null;
+
+document.getElementById('btnConvidado').addEventListener('click', async () => {
+  const btn = document.getElementById('btnConvidado');
+  btn.disabled = true; const original = btn.textContent; btn.textContent = 'Gerando…';
+  const { data, error } = await sb.from('convidados').insert({}).select().single();
+  btn.disabled = false; btn.textContent = original;
+  if (error) { toast('Erro ao gerar QR de convidado: ' + error.message, 'error'); return; }
+
+  convidadoAtualId = data.id;
   const holder = document.getElementById('qrConvidadoCanvas');
   holder.innerHTML = '';
-  new QRCode(holder, { text: CONVIDADO_CODE, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  new QRCode(holder, { text: CONVIDADO_PREFIXO + data.id, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
   document.getElementById('modalConvidado').classList.remove('hidden');
 });
 document.getElementById('btnFecharConvidado').addEventListener('click', () => {
   document.getElementById('modalConvidado').classList.add('hidden');
 });
 document.getElementById('btnDownloadConvidado').addEventListener('click', () => {
-  downloadQrFromHolder(document.getElementById('qrConvidadoCanvas'), 'QRCode_Convidado_Extra.png');
+  downloadQrFromHolder(document.getElementById('qrConvidadoCanvas'), `QRCode_Convidado_${convidadoAtualId || ''}.png`);
 });
 
 // --- Scanner ---
@@ -775,10 +799,11 @@ async function onScanSuccess(decodedText) {
   scanningLocked = true; // ignora novas leituras até tocar em "Ler próximo QR Code" — câmera continua ligada e ao vivo
   document.getElementById('btnContinuarScan').classList.remove('hidden');
 
-  if (decodedText === CONVIDADO_CODE) {
-    await registrarConvidado();
+  const texto = decodedText.trim();
+  if (texto.startsWith(CONVIDADO_PREFIXO)) {
+    await registrarConvidado(texto.slice(CONVIDADO_PREFIXO.length));
   } else {
-    await registrarFuncionario(decodedText.trim());
+    await registrarFuncionario(texto);
   }
 }
 
@@ -787,13 +812,31 @@ document.getElementById('btnContinuarScan').addEventListener('click', () => {
   document.getElementById('btnContinuarScan').classList.add('hidden');
 });
 
-async function registrarConvidado() {
+async function registrarConvidado(id) {
+  const { data: convidado, error: errConv } = await sb.from('convidados').select('*').eq('id', id).maybeSingle();
+  if (errConv || !convidado) {
+    beep('error');
+    mostrarResultado(false, 'QR Code inválido', 'Este código não corresponde a nenhum convidado gerado pelo app.');
+    return;
+  }
+
+  if (convidado.usado) {
+    beep('error');
+    mostrarResultado(false, 'QR CODE JÁ UTILIZADO', 'Este QR Code de convidado já foi usado e não vale mais.', true);
+    return;
+  }
+
   const hora = horaAgora();
-  const { error } = await sb.from('registros_almoco').insert({
+  const { error: errUpdate } = await sb.from('convidados')
+    .update({ usado: true, usado_em: new Date().toISOString() }).eq('id', id);
+  if (errUpdate) { toast('Erro ao registrar convidado: ' + errUpdate.message, 'error'); return; }
+
+  const { error: errInsert } = await sb.from('registros_almoco').insert({
     funcionario_id: null, nome_completo: 'Convidado Extra', setor: 'Extra',
     tipo: 'convidado', data: hojeISO(), hora
   });
-  if (error) { mostrarResultado(false, 'Erro ao registrar convidado', error.message); return; }
+  if (errInsert) { toast('Convidado marcado como usado, mas houve erro ao registrar o almoço: ' + errInsert.message, 'error'); return; }
+
   beep('success');
   mostrarResultado(true, 'Sucesso! Almoço liberado para Convidado Extra', `Registrado às ${horaCurta(hora)}`);
   refreshRegistrosHoje();
