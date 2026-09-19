@@ -283,11 +283,27 @@
   <div class="bg-white rounded-2xl p-6 max-w-xs w-full text-center">
     <h3 class="font-bold text-petrol mb-1">QR Code de Convidado</h3>
     <p class="text-xs text-gray-500 mb-4">Válido para uma única entrada — perde a validade após ser lido</p>
-    <div id="qrConvidadoCanvas" class="flex justify-center mb-4"></div>
-    <div class="flex gap-2">
-      <button id="btnDownloadConvidado" class="flex-1 bg-petrol text-white font-semibold py-2.5 rounded-xl text-sm">Baixar</button>
-      <button id="btnFecharConvidado" class="flex-1 bg-gray-100 text-gray-700 font-semibold py-2.5 rounded-xl text-sm">Fechar</button>
+
+    <div id="convidadoFormPasso">
+      <label class="block text-xs font-medium text-gray-600 mb-1 text-left">Nome do convidado</label>
+      <input id="inputNomeConvidado" type="text" placeholder="Nome completo do convidado"
+        class="w-full rounded-xl border border-gray-300 px-3 py-2.5 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-gold" />
+      <label class="block text-xs font-medium text-gray-600 mb-1 text-left">Convidado por (nome ou setor)</label>
+      <input id="inputConvidadoPor" type="text" placeholder="Quem está convidando"
+        class="w-full rounded-xl border border-gray-300 px-3 py-2.5 mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-gold" />
+      <p id="convidadoFormErro" class="text-danger text-xs mb-3 hidden"></p>
+      <button id="btnGerarConvidado" class="w-full bg-petrol text-white font-semibold py-2.5 rounded-xl text-sm">Gerar QR Code</button>
     </div>
+
+    <div id="convidadoResultadoPasso" class="hidden">
+      <div id="qrConvidadoCanvas" class="flex justify-center mb-4"></div>
+      <div class="flex gap-2">
+        <button id="btnDownloadConvidado" class="flex-1 bg-petrol text-white font-semibold py-2.5 rounded-xl text-sm">Baixar</button>
+        <button id="btnNovoConvidado" class="flex-1 bg-gray-100 text-gray-700 font-semibold py-2.5 rounded-xl text-sm">Novo convidado</button>
+      </div>
+    </div>
+
+    <button id="btnFecharConvidado" class="w-full mt-3 text-xs text-gray-400 underline">Fechar</button>
   </div>
 </div>
 
@@ -299,10 +315,10 @@
    CONFIGURAÇÃO — edite estes três valores antes de publicar o app
    ========================================================================= */
 const CONFIG = {
-  SUPABASE_URL: "https://lzinjaepltmkyrzbpaht.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx6aW5qYWVwbHRta3lyemJwYWh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwNzk5MzMsImV4cCI6MjEwNDY1NTkzM30.-6xlbrsoQfokPLi6HtKf-fDUSvmtTwf3bYJG_MuHqJM",
-  ACCESS_PASSWORD: "festrio26prod01",
-  ADMIN_PASSWORD: "01102026",
+  SUPABASE_URL: "https://SEU-PROJETO.supabase.co",
+  SUPABASE_ANON_KEY: "SUA_CHAVE_ANON_PUBLICA",
+  ACCESS_PASSWORD: "festivalrio2026",
+  ADMIN_PASSWORD: "troque-esta-senha-de-admin",
   ADMIN_EMAIL: "taci.btrajano@gmail.com"
 };
 
@@ -730,22 +746,50 @@ document.getElementById('buscaFuncionario').addEventListener('input', (e) => {
    ABA 2 — LEITOR DE QR CODE & CONTROLE DE ALMOÇO
    ========================================================================= */
 
-// --- QR do convidado (modal) — cada clique gera um convidado novo, com QR de uso único ---
+// --- QR do convidado (modal com formulário) — cada convidado tem nome e "convidado por", com QR de uso único ---
 let convidadoAtualCartao = null;
+let convidadoAtualNome = '';
 
-document.getElementById('btnConvidado').addEventListener('click', async () => {
+document.getElementById('btnConvidado').addEventListener('click', () => {
   if (!confirmarSenhaAdmin()) return;
+  abrirFormConvidado();
+});
 
-  const btn = document.getElementById('btnConvidado');
+function abrirFormConvidado() {
+  document.getElementById('inputNomeConvidado').value = '';
+  document.getElementById('inputConvidadoPor').value = '';
+  document.getElementById('convidadoFormErro').classList.add('hidden');
+  document.getElementById('convidadoFormPasso').classList.remove('hidden');
+  document.getElementById('convidadoResultadoPasso').classList.add('hidden');
+  document.getElementById('modalConvidado').classList.remove('hidden');
+  document.getElementById('inputNomeConvidado').focus();
+}
+
+document.getElementById('btnGerarConvidado').addEventListener('click', async () => {
+  const nome = document.getElementById('inputNomeConvidado').value.trim();
+  const convidadoPor = document.getElementById('inputConvidadoPor').value.trim();
+  const erro = document.getElementById('convidadoFormErro');
+  if (!nome || !convidadoPor) {
+    erro.textContent = 'Preencha o nome do convidado e quem está convidando.';
+    erro.classList.remove('hidden');
+    return;
+  }
+  erro.classList.add('hidden');
+
+  const btn = document.getElementById('btnGerarConvidado');
   btn.disabled = true; const original = btn.textContent; btn.textContent = 'Gerando…';
-  const { data, error } = await sb.from('convidados').insert({}).select().single();
+
+  const { data, error } = await sb.from('convidados')
+    .insert({ nome_convidado: nome, convidado_por: convidadoPor }).select().single();
   if (error) { btn.disabled = false; btn.textContent = original; toast('Erro ao gerar QR de convidado: ' + error.message, 'error'); return; }
 
+  convidadoAtualNome = nome;
+  document.getElementById('convidadoFormPasso').classList.add('hidden');
+  document.getElementById('convidadoResultadoPasso').classList.remove('hidden');
   const holder = document.getElementById('qrConvidadoCanvas');
   holder.innerHTML = '<p class="text-xs text-gray-400">Gerando cartão…</p>';
-  document.getElementById('modalConvidado').classList.remove('hidden');
 
-  const cartao = await gerarCartaoQR('Convidado', `Gerado em ${hojeBR()}`, CONVIDADO_PREFIXO + data.id);
+  const cartao = await gerarCartaoQR(nome, `Convidado de ${convidadoPor} — ${hojeBR()}`, CONVIDADO_PREFIXO + data.id);
   convidadoAtualCartao = cartao;
   holder.innerHTML = '';
   cartao.style.width = '220px';
@@ -755,6 +799,9 @@ document.getElementById('btnConvidado').addEventListener('click', async () => {
 
   btn.disabled = false; btn.textContent = original;
 });
+
+document.getElementById('btnNovoConvidado').addEventListener('click', abrirFormConvidado);
+
 document.getElementById('btnFecharConvidado').addEventListener('click', () => {
   document.getElementById('modalConvidado').classList.add('hidden');
 });
@@ -762,7 +809,7 @@ document.getElementById('btnDownloadConvidado').addEventListener('click', () => 
   if (!convidadoAtualCartao) return;
   const a = document.createElement('a');
   a.href = convidadoAtualCartao.toDataURL('image/png');
-  a.download = 'QRCode_Convidado.png';
+  a.download = `QRCode_Convidado_${sanitizeFileName(convidadoAtualNome || 'convidado')}.png`;
   document.body.appendChild(a); a.click(); a.remove();
 });
 
@@ -839,19 +886,22 @@ async function registrarConvidado(id) {
     return;
   }
 
+  const nomeConvidado = convidado.nome_convidado || 'Convidado Extra';
+  const setorConvidado = convidado.convidado_por ? `Convidado de ${convidado.convidado_por}` : 'Extra';
+
   const hora = horaAgora();
   const { error: errUpdate } = await sb.from('convidados')
     .update({ usado: true, usado_em: new Date().toISOString() }).eq('id', id);
   if (errUpdate) { toast('Erro ao registrar convidado: ' + errUpdate.message, 'error'); return; }
 
   const { error: errInsert } = await sb.from('registros_almoco').insert({
-    funcionario_id: null, nome_completo: 'Convidado Extra', setor: 'Extra',
+    funcionario_id: null, nome_completo: nomeConvidado, setor: setorConvidado,
     tipo: 'convidado', data: hojeISO(), hora
   });
   if (errInsert) { toast('Convidado marcado como usado, mas houve erro ao registrar o almoço: ' + errInsert.message, 'error'); return; }
 
   beep('success');
-  mostrarResultado(true, 'Sucesso! Almoço liberado para Convidado Extra', `Registrado às ${horaCurta(hora)}`);
+  mostrarResultado(true, `Sucesso! Almoço liberado para ${nomeConvidado}`, `${setorConvidado} — ${horaCurta(hora)}`);
   refreshRegistrosHoje();
 }
 
