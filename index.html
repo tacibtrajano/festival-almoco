@@ -80,9 +80,15 @@
     </div>
     <form id="loginForm" class="bg-white/95 backdrop-blur rounded-2xl shadow-xl p-6">
       <label for="passwordInput" class="block text-sm font-medium text-gray-700 mb-2">Senha de acesso</label>
-      <input id="passwordInput" type="password" required autocomplete="current-password"
-        class="w-full rounded-xl border border-gray-300 px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold"
-        placeholder="Digite a senha" />
+      <div class="relative">
+        <input id="passwordInput" type="password" required autocomplete="current-password"
+          class="w-full rounded-xl border border-gray-300 pl-4 pr-11 py-3 text-base focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold"
+          placeholder="Digite a senha" />
+        <button type="button" id="btnMostrarSenha" tabindex="-1"
+          class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-petrol text-xs font-semibold">
+          Mostrar
+        </button>
+      </div>
       <p id="loginError" class="text-danger text-sm mt-2 hidden">Senha incorreta. Tente novamente.</p>
       <button type="submit"
         class="w-full mt-4 bg-petrol hover:bg-petrol-light text-white font-semibold py-3 rounded-xl transition-colors">
@@ -377,6 +383,14 @@ function confirmarSenhaAdmin() {
    ========================================================================= */
 const loginScreen = document.getElementById('loginScreen');
 const appEl = document.getElementById('app');
+
+document.getElementById('btnMostrarSenha').addEventListener('click', () => {
+  const input = document.getElementById('passwordInput');
+  const btn = document.getElementById('btnMostrarSenha');
+  const mostrando = input.type === 'text';
+  input.type = mostrando ? 'password' : 'text';
+  btn.textContent = mostrando ? 'Mostrar' : 'Ocultar';
+});
 
 let senhaAcessoAtual = CONFIG.ACCESS_PASSWORD;
 async function carregarSenhaAtual() {
