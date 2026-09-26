@@ -249,7 +249,13 @@
       </div>
 
       <div class="bg-white rounded-2xl border border-gray-200 p-5 mt-4">
-        <h2 class="font-bold text-petrol mb-3">Registros de hoje (<span id="dataHojeLabel"></span>)</h2>
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <h2 class="font-bold text-petrol">Registros de hoje (<span id="dataHojeLabel"></span>)</h2>
+          <button id="btnZerarDia"
+            class="text-xs font-semibold text-danger border border-danger hover:bg-danger/5 px-3 py-1.5 rounded-lg whitespace-nowrap">
+            Zerar leitura de hoje
+          </button>
+        </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
@@ -257,6 +263,7 @@
                 <th class="py-2 pr-3">Nome</th>
                 <th class="py-2 pr-3">Setor</th>
                 <th class="py-2 pr-3">Horário</th>
+                <th class="py-2 pr-3"></th>
               </tr>
             </thead>
             <tbody id="listaRegistrosHoje"></tbody>
@@ -980,10 +987,51 @@ async function refreshRegistrosHoje() {
   (data || []).forEach(r => {
     const tr = document.createElement('tr');
     tr.className = 'border-b border-gray-100';
-    tr.innerHTML = `<td class="py-2 pr-3">${r.nome_completo}</td><td class="py-2 pr-3 text-gray-500">${r.setor}</td><td class="py-2 pr-3">${horaCurta(r.hora)}</td>`;
+    tr.innerHTML = `<td class="py-2 pr-3">${r.nome_completo}</td><td class="py-2 pr-3 text-gray-500">${r.setor}</td><td class="py-2 pr-3">${horaCurta(r.hora)}</td>
+      <td class="py-2 pr-3 text-right whitespace-nowrap"><button class="btn-remover-registro text-xs font-semibold text-danger underline">Remover</button></td>`;
+    tr.querySelector('.btn-remover-registro').addEventListener('click', () => removerRegistro(r));
     tbody.appendChild(tr);
   });
 }
+
+// --- Remover uma pessoa da leitura de hoje (senha de administrador) ---
+async function removerRegistro(r) {
+  const extraConvidado = r.tipo === 'convidado'
+    ? '\n\nAtenção: o QR Code de convidado continua marcado como já utilizado. Se essa pessoa ainda for almoçar, gere um QR de convidado novo.'
+    : '\n\nDepois disso, o QR Code dessa pessoa poderá ser lido de novo hoje.';
+  const confirmou = window.confirm(`Remover "${r.nome_completo}" (${horaCurta(r.hora)}) da leitura de hoje?${extraConvidado}`);
+  if (!confirmou) return;
+  if (!confirmarSenhaAdmin()) return;
+
+  const { error } = await sb.from('registros_almoco').delete().eq('id', r.id);
+  if (error) { toast('Erro ao remover: ' + error.message, 'error'); return; }
+  toast(`"${r.nome_completo}" removido da leitura de hoje.`, 'success');
+  refreshRegistrosHoje();
+}
+
+// --- Zerar toda a leitura de hoje (senha de administrador) ---
+document.getElementById('btnZerarDia').addEventListener('click', async () => {
+  const { count, error: errCount } = await sb.from('registros_almoco')
+    .select('id', { count: 'exact', head: true }).eq('data', hojeISO());
+  if (errCount) { toast('Erro ao consultar registros: ' + errCount.message, 'error'); return; }
+  if (!count) { toast('Não há registros hoje para zerar.', 'info'); return; }
+
+  const confirmou = window.confirm(
+    `Zerar a leitura de hoje (${hojeBR()})?\n\nIsso vai APAGAR os ${count} registro(s) de almoço de hoje, e todos os funcionários poderão ser lidos de novo.\n\nDias anteriores e relatórios já salvos no Histórico não são afetados. QR Codes de convidado já usados continuam inválidos.`
+  );
+  if (!confirmou) return;
+  if (!confirmarSenhaAdmin()) return;
+
+  const btn = document.getElementById('btnZerarDia');
+  btn.disabled = true; const original = btn.textContent; btn.textContent = 'Zerando…';
+  const { error } = await sb.from('registros_almoco').delete().eq('data', hojeISO());
+  btn.disabled = false; btn.textContent = original;
+  if (error) { toast('Erro ao zerar: ' + error.message, 'error'); return; }
+
+  document.getElementById('resultadoLeitura').classList.add('hidden');
+  toast('Leitura de hoje zerada. Pode recomeçar!', 'success');
+  refreshRegistrosHoje();
+});
 
 // --- Encerrar almoço do dia (gera PDF + salva no histórico) ---
 document.getElementById('btnEncerrarDia').addEventListener('click', async () => {
