@@ -835,12 +835,12 @@ function enviarCartaoWhatsapp(f) {
   }
   const primeiroNome = f.nome_completo.split(' ')[0];
   const msg =
-`Olá, ${primeiroNome}! Aqui está o seu QR Code de alimentação do Festival do Rio 2026.
+`Olá, ${primeiroNome}! Aqui está o seu QR Code do almoço de equipe do Festival do Rio 2026 - SEDE.
 
 Abra o link, salve a imagem no celular e apresente o QR Code na hora do almoço:
 ${linkDoCartao(f)}
 
-O QR Code é pessoal e vale para todo o festival.`;
+⚠️ *Atenção:* este QR Code é *pessoal e intransferível* e vale durante todo o período do festival.`;
   window.open(`https://wa.me/${f.telefone}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
