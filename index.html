@@ -162,7 +162,7 @@
     <section id="tab-cadastro" class="tab-section">
       <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-5">
         <h2 class="font-bold text-petrol mb-4">Novo funcionário</h2>
-        <form id="formFuncionario" class="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+        <form id="formFuncionario" class="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end">
           <div>
             <label class="block text-xs font-medium text-gray-600 mb-1">Nome completo</label>
             <input id="inputNome" type="text" required placeholder="Ex.: Maria da Silva"
@@ -171,6 +171,11 @@
           <div>
             <label class="block text-xs font-medium text-gray-600 mb-1">Setor</label>
             <input id="inputSetor" type="text" required placeholder="Ex.: Produção"
+              class="w-full rounded-xl border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gold" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">WhatsApp (com DDD)</label>
+            <input id="inputTelefone" type="tel" inputmode="tel" placeholder="Ex.: (21) 99999-9999"
               class="w-full rounded-xl border border-gray-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-gold" />
           </div>
           <button type="submit"
@@ -185,7 +190,10 @@
         <p class="text-sm text-gray-600 mb-2">Funcionário cadastrado com sucesso</p>
         <p id="novoQrNome" class="font-bold text-petrol mb-3"></p>
         <div id="novoQrCanvas" class="flex justify-center mb-3"></div>
-        <button id="novoQrDownload" class="text-sm font-semibold text-petrol underline">Baixar QR Code</button>
+        <div class="flex flex-wrap justify-center items-center gap-4">
+          <button id="novoQrWhatsapp" class="hidden bg-[#1FAF38] hover:bg-[#178a2c] text-white text-sm font-semibold px-4 py-2.5 rounded-xl">Enviar pelo WhatsApp</button>
+          <button id="novoQrDownload" class="text-sm font-semibold text-petrol underline">Baixar QR Code</button>
+        </div>
       </div>
 
       <div class="bg-white rounded-2xl border border-gray-200 p-5">
@@ -554,12 +562,18 @@ document.getElementById('formFuncionario').addEventListener('submit', async (e) 
   e.preventDefault();
   const nome = document.getElementById('inputNome').value.trim();
   const setor = document.getElementById('inputSetor').value.trim();
+  const telefoneDigitado = document.getElementById('inputTelefone').value.trim();
   if (!nome || !setor) return;
+  const telefone = telefoneDigitado ? normalizarTelefone(telefoneDigitado) : null;
+  if (telefoneDigitado && !telefone) {
+    toast('Número de WhatsApp inválido. Use o DDD + número, ex.: (21) 99999-9999.', 'error');
+    return;
+  }
 
   const submitBtn = e.target.querySelector('button[type="submit"]');
   submitBtn.disabled = true; submitBtn.textContent = 'Salvando…';
 
-  const { data, error } = await sb.from('funcionarios').insert({ nome_completo: nome, setor }).select().single();
+  const { data, error } = await sb.from('funcionarios').insert({ nome_completo: nome, setor, telefone }).select().single();
 
   submitBtn.disabled = false; submitBtn.textContent = 'Cadastrar';
 
@@ -585,6 +599,9 @@ document.getElementById('formFuncionario').addEventListener('submit', async (e) 
     a.download = `QRCode_${sanitizeFileName(data.nome_completo)}.png`;
     document.body.appendChild(a); a.click(); a.remove();
   };
+  const btnWpp = document.getElementById('novoQrWhatsapp');
+  btnWpp.classList.toggle('hidden', !data.telefone);
+  btnWpp.onclick = () => enviarCartaoWhatsapp(data);
 
   refreshFuncionarios();
 });
@@ -722,9 +739,16 @@ function renderFuncionarios(lista) {
     const tr = document.createElement('tr');
     tr.className = 'border-b border-gray-100';
     tr.innerHTML = `
-      <td class="py-2 pr-3">${f.nome_completo}</td>
+      <td class="py-2 pr-3">
+        <span>${f.nome_completo}</span>
+        <span class="block text-xs text-gray-400">
+          ${f.telefone ? formatarTelefone(f.telefone) : 'Sem WhatsApp'}
+          <button class="btn-tel underline hover:text-petrol ml-1">${f.telefone ? 'alterar' : 'adicionar'}</button>
+        </span>
+      </td>
       <td class="py-2 pr-3 text-gray-500">${f.setor}</td>
       <td class="py-2 pr-3 text-right whitespace-nowrap">
+        <button class="btn-wpp text-xs font-semibold text-[#178a2c] underline mr-3">WhatsApp</button>
         <button class="btn-baixar text-xs font-semibold text-petrol underline mr-3">Baixar QR Code</button>
         <button class="btn-cancelar text-xs font-semibold text-danger underline">Cancelar</button>
       </td>`;
@@ -735,6 +759,14 @@ function renderFuncionarios(lista) {
       btnBaixar.disabled = false; btnBaixar.textContent = original;
     });
     tr.querySelector('.btn-cancelar').addEventListener('click', () => cancelarFuncionario(f));
+    tr.querySelector('.btn-tel').addEventListener('click', () => editarTelefone(f));
+    tr.querySelector('.btn-wpp').addEventListener('click', async () => {
+      if (!f.telefone) {
+        const salvo = await editarTelefone(f);
+        if (!salvo) return;
+      }
+      enviarCartaoWhatsapp(f);
+    });
     tbody.appendChild(tr);
   });
 }
@@ -756,6 +788,60 @@ async function baixarQrFuncionario(f) {
   a.href = cartao.toDataURL('image/png');
   a.download = `QRCode_${sanitizeFileName(f.nome_completo)}.png`;
   document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* --- WhatsApp: telefone e envio do link do cartão --- */
+
+// Aceita "(21) 99999-9999", "21999999999", "+55 21 99999-9999"… e devolve só dígitos com 55 na frente
+function normalizarTelefone(txt) {
+  let d = (txt || '').replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.length === 10 || d.length === 11) d = '55' + d;
+  if (d.startsWith('55') && (d.length === 12 || d.length === 13)) return d;
+  if (d.length >= 11 && d.length <= 15 && !d.startsWith('55')) return d; // número estrangeiro já com código do país
+  return null;
+}
+
+function formatarTelefone(d) {
+  if (!d) return '';
+  if (d.startsWith('55') && d.length === 13) return `(${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9)}`;
+  if (d.startsWith('55') && d.length === 12) return `(${d.slice(2,4)}) ${d.slice(4,8)}-${d.slice(8)}`;
+  return '+' + d;
+}
+
+async function editarTelefone(f) {
+  const atual = f.telefone ? formatarTelefone(f.telefone) : '';
+  const txt = window.prompt(`WhatsApp de ${f.nome_completo} (com DDD):`, atual);
+  if (txt === null) return false;
+  const tel = txt.trim() ? normalizarTelefone(txt) : null;
+  if (txt.trim() && !tel) { toast('Número inválido. Use o DDD + número, ex.: (21) 99999-9999.', 'error'); return false; }
+  const { error } = await sb.from('funcionarios').update({ telefone: tel }).eq('id', f.id);
+  if (error) { toast('Erro ao salvar o número: ' + error.message, 'error'); return false; }
+  f.telefone = tel;
+  toast(tel ? 'Número salvo.' : 'Número removido.', 'success');
+  refreshFuncionarios();
+  return !!tel;
+}
+
+function linkDoCartao(f) {
+  const base = window.location.origin + window.location.pathname.replace(/[^/]*$/, '');
+  return `${base}cartao.html?c=${f.cartao_token}`;
+}
+
+function enviarCartaoWhatsapp(f) {
+  if (!f.cartao_token) {
+    toast('Este cadastro ainda não tem link de cartão. Rode o script SQL da atualização no Supabase.', 'error');
+    return;
+  }
+  const primeiroNome = f.nome_completo.split(' ')[0];
+  const msg =
+`Olá, ${primeiroNome}! Aqui está o seu QR Code de alimentação do Festival do Rio 2026.
+
+Abra o link, salve a imagem no celular e apresente o QR Code na hora do almoço:
+${linkDoCartao(f)}
+
+O QR Code é pessoal e vale para todo o festival.`;
+  window.open(`https://wa.me/${f.telefone}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
 document.getElementById('buscaFuncionario').addEventListener('input', (e) => {
