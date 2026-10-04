@@ -1,6 +1,6 @@
 // Service Worker mínimo — cacheia o "app shell" para permitir instalação
 // e uma abertura básica offline. Os dados (Supabase) sempre exigem rede.
-const CACHE_NAME = "fr2026-almoco-v1";
+const CACHE_NAME = "fr2026-almoco-v2";
 const APP_SHELL = ["./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {

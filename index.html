@@ -225,6 +225,15 @@
         Gerar novo QR Code de Convidado
       </button>
 
+      <!-- Contador ao vivo de quantas pessoas já almoçaram hoje -->
+      <div id="contadorBox" class="sticky top-[68px] md:top-[116px] z-20 bg-petrol-dark text-white border-2 border-gold rounded-2xl px-5 py-4 mb-4 flex items-center justify-between gap-3 shadow-lg">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-white/80">Já almoçaram hoje</p>
+          <p id="contadorDetalhe" class="text-xs text-white/70 mt-0.5">0 funcionários · 0 convidados</p>
+        </div>
+        <p id="contadorHoje" class="text-5xl font-extrabold leading-none text-gold">0</p>
+      </div>
+
       <div class="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
         <div class="flex items-center justify-between mb-3">
           <h2 class="font-bold text-petrol">Leitor de QR Code</h2>
@@ -248,7 +257,8 @@
       <div class="bg-white rounded-2xl border border-gray-200 p-5 flex items-center justify-between gap-3">
         <div>
           <h2 class="font-bold text-petrol">Encerrar almoço do dia</h2>
-          <p class="text-xs text-gray-500 mt-0.5">Gera o PDF do dia e salva no histórico</p>
+          <p class="text-xs text-gray-500 mt-0.5">Gera o PDF do dia e salva no histórico. Quem for lido depois entra no PDF automaticamente até 00h.</p>
+          <p id="statusRelatorioHoje" class="hidden text-xs font-semibold text-ok mt-1"></p>
         </div>
         <button id="btnEncerrarDia"
           class="bg-danger hover:opacity-90 text-white font-semibold px-4 py-2.5 rounded-xl whitespace-nowrap">
@@ -1009,7 +1019,8 @@ async function registrarConvidado(id) {
 
   beep('success');
   mostrarResultado(true, `Sucesso! Almoço liberado para ${nomeConvidado}`, `${setorConvidado} — ${horaCurta(hora)}`);
-  refreshRegistrosHoje();
+  await refreshRegistrosHoje();
+  atualizarRelatorioSeEncerrado();
 }
 
 async function registrarFuncionario(id) {
@@ -1046,7 +1057,8 @@ async function registrarFuncionario(id) {
 
   beep('success');
   mostrarResultado(true, `Sucesso! Almoço liberado para ${func.nome_completo}`, `${func.setor} — ${horaCurta(hora)}`);
-  refreshRegistrosHoje();
+  await refreshRegistrosHoje();
+  atualizarRelatorioSeEncerrado();
 }
 
 function mostrarResultado(sucesso, titulo, detalhe, grande = false) {
@@ -1066,6 +1078,7 @@ async function refreshRegistrosHoje() {
   document.getElementById('dataHojeLabel').textContent = hojeBR();
   const { data, error } = await sb.from('registros_almoco').select('*').eq('data', hojeISO()).order('hora', { ascending: true });
   if (error) { toast('Erro ao carregar registros: ' + error.message, 'error'); return; }
+  atualizarContador(data || []);
   const tbody = document.getElementById('listaRegistrosHoje');
   const vazio = document.getElementById('listaRegistrosHojeVazia');
   tbody.innerHTML = '';
@@ -1078,7 +1091,28 @@ async function refreshRegistrosHoje() {
     tr.querySelector('.btn-remover-registro').addEventListener('click', () => removerRegistro(r));
     tbody.appendChild(tr);
   });
+  return (data || []).length;
 }
+
+function atualizarContador(registros) {
+  const total = registros.length;
+  const func = registros.filter(r => r.tipo === 'funcionario').length;
+  const conv = total - func;
+  const el = document.getElementById('contadorHoje');
+  if (el.textContent !== String(total)) {
+    el.textContent = total;
+    el.animate([{ transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 300 });
+  }
+  document.getElementById('contadorDetalhe').textContent =
+    `${func} funcionário${func === 1 ? '' : 's'} · ${conv} convidado${conv === 1 ? '' : 's'}`;
+}
+
+// Atualiza o contador a cada 20s enquanto a aba de leitura estiver aberta
+// (assim, se dois celulares estiverem lendo, os dois mostram o total certo)
+setInterval(() => {
+  const aba = document.getElementById('tab-leitor');
+  if (aba && !aba.classList.contains('hidden') && !document.hidden) refreshRegistrosHoje();
+}, 20000);
 
 // --- Remover uma pessoa da leitura de hoje (senha de administrador) ---
 async function removerRegistro(r) {
@@ -1092,7 +1126,8 @@ async function removerRegistro(r) {
   const { error } = await sb.from('registros_almoco').delete().eq('id', r.id);
   if (error) { toast('Erro ao remover: ' + error.message, 'error'); return; }
   toast(`"${r.nome_completo}" removido da leitura de hoje.`, 'success');
-  refreshRegistrosHoje();
+  await refreshRegistrosHoje();
+  atualizarRelatorioSeEncerrado();
 }
 
 // --- Zerar toda a leitura de hoje (senha de administrador) ---
@@ -1119,54 +1154,92 @@ document.getElementById('btnZerarDia').addEventListener('click', async () => {
   refreshRegistrosHoje();
 });
 
+// --- Gera o PDF de um dia e salva/atualiza no histórico ---
+// Retorna { doc, nomeArquivo, total } ou null se não houver registros.
+async function gerarESalvarRelatorio(dataISO) {
+  const { data: registros, error } = await sb.from('registros_almoco').select('*').eq('data', dataISO).order('hora', { ascending: true });
+  if (error) throw error;
+  if (!registros || registros.length === 0) return null;
+
+  const totalFuncionarios = registros.filter(r => r.tipo === 'funcionario').length;
+  const totalConvidados = registros.filter(r => r.tipo === 'convidado').length;
+  const [y, m, d] = dataISO.split('-');
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(14);
+  doc.setFont(undefined, 'bold');
+  doc.text('FESTIVAL DO RIO 2026 - RELATÓRIO DE ALIMENTAÇÃO', 14, 18);
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.text(`Data: ${d}/${m}/${y}`, 14, 26);
+  doc.text(`Total de refeições servidas: ${registros.length}  (Funcionários: ${totalFuncionarios} | Convidados extras: ${totalConvidados})`, 14, 32);
+
+  doc.autoTable({
+    startY: 38,
+    head: [['Nº', 'Nome Completo', 'Setor', 'Horário']],
+    body: registros.map((r, i) => [i + 1, r.nome_completo, r.setor, horaCurta(r.hora)]),
+    headStyles: { fillColor: [18, 60, 62] },
+    styles: { fontSize: 9 }
+  });
+
+  const nomeArquivo = `FR2026 l Alimentação_${d}-${m}-${y}.pdf`;
+  const blob = doc.output('blob');
+
+  // Upload para o Supabase Storage (substitui o PDF anterior do mesmo dia)
+  const path = `${dataISO}.pdf`;
+  const { error: errUpload } = await sb.storage.from('relatorios-pdf')
+    .upload(path, blob, { upsert: true, contentType: 'application/pdf', cacheControl: '0' });
+  if (errUpload) throw errUpload;
+  const { data: urlData } = sb.storage.from('relatorios-pdf').getPublicUrl(path);
+  // "?v=" garante que o link sempre abra a versão mais nova do PDF
+  const url = `${urlData.publicUrl}?v=${Date.now()}`;
+
+  const { error: errSave } = await sb.from('relatorios').upsert({
+    data: dataISO, nome_arquivo: nomeArquivo, url,
+    total_funcionarios: totalFuncionarios, total_convidados: totalConvidados, total_geral: registros.length
+  }, { onConflict: 'data' });
+  if (errSave) throw errSave;
+
+  mostrarStatusRelatorio(registros.length);
+  return { doc, nomeArquivo, total: registros.length };
+}
+
+function mostrarStatusRelatorio(total) {
+  const el = document.getElementById('statusRelatorioHoje');
+  el.textContent = `✓ PDF de hoje atualizado às ${horaCurta(horaAgora())} com ${total} refeições`;
+  el.classList.remove('hidden');
+}
+
+// --- Depois do "Encerrar", cada nova leitura atualiza o PDF do dia ---
+// Só mexe no relatório de HOJE: depois da meia-noite, a data muda e o
+// relatório do dia anterior fica fechado de vez.
+let atualizandoRelatorio = false, atualizacaoPendente = false;
+async function atualizarRelatorioSeEncerrado() {
+  if (atualizandoRelatorio) { atualizacaoPendente = true; return; }
+  atualizandoRelatorio = true;
+  try {
+    const dataISO = hojeISO();
+    const { data: existente, error } = await sb.from('relatorios').select('id').eq('data', dataISO).maybeSingle();
+    if (error || !existente) return; // ainda não encerrou hoje: nada a atualizar
+    await gerarESalvarRelatorio(dataISO);
+  } catch (err) {
+    toast('Leitura salva, mas não consegui atualizar o PDF: ' + (err.message || err), 'error');
+  } finally {
+    atualizandoRelatorio = false;
+    if (atualizacaoPendente) { atualizacaoPendente = false; atualizarRelatorioSeEncerrado(); }
+  }
+}
+
 // --- Encerrar almoço do dia (gera PDF + salva no histórico) ---
 document.getElementById('btnEncerrarDia').addEventListener('click', async () => {
   const btn = document.getElementById('btnEncerrarDia');
   btn.disabled = true; btn.textContent = 'Gerando PDF…';
   try {
-    const { data: registros, error } = await sb.from('registros_almoco').select('*').eq('data', hojeISO()).order('hora', { ascending: true });
-    if (error) throw error;
-    if (!registros || registros.length === 0) { toast('Nenhum registro de almoço hoje ainda.', 'info'); return; }
-
-    const totalFuncionarios = registros.filter(r => r.tipo === 'funcionario').length;
-    const totalConvidados = registros.filter(r => r.tipo === 'convidado').length;
-
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.setFontSize(14);
-    doc.setFont(undefined, 'bold');
-    doc.text('FESTIVAL DO RIO 2026 - RELATÓRIO DE ALIMENTAÇÃO', 14, 18);
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-    doc.text(`Data: ${hojeBR()}`, 14, 26);
-    doc.text(`Total de refeições servidas: ${registros.length}  (Funcionários: ${totalFuncionarios} | Convidados extras: ${totalConvidados})`, 14, 32);
-
-    doc.autoTable({
-      startY: 38,
-      head: [['Nº', 'Nome Completo', 'Setor', 'Horário']],
-      body: registros.map((r, i) => [i + 1, r.nome_completo, r.setor, horaCurta(r.hora)]),
-      headStyles: { fillColor: [18, 60, 62] },
-      styles: { fontSize: 9 }
-    });
-
-    const [y, m, d] = hojeISO().split('-');
-    const nomeArquivo = `FR2026 l Alimentação_${d}-${m}-${y}.pdf`;
-    const blob = doc.output('blob');
-
-    // Upload para o Supabase Storage
-    const path = `${hojeISO()}.pdf`;
-    const { error: errUpload } = await sb.storage.from('relatorios-pdf').upload(path, blob, { upsert: true, contentType: 'application/pdf' });
-    if (errUpload) throw errUpload;
-    const { data: urlData } = sb.storage.from('relatorios-pdf').getPublicUrl(path);
-
-    const { error: errSave } = await sb.from('relatorios').upsert({
-      data: hojeISO(), nome_arquivo: nomeArquivo, url: urlData.publicUrl,
-      total_funcionarios: totalFuncionarios, total_convidados: totalConvidados, total_geral: registros.length
-    }, { onConflict: 'data' });
-    if (errSave) throw errSave;
-
-    doc.save(nomeArquivo); // download local também
-    toast('PDF do dia gerado e salvo no histórico!', 'success');
+    const res = await gerarESalvarRelatorio(hojeISO());
+    if (!res) { toast('Nenhum registro de almoço hoje ainda.', 'info'); return; }
+    res.doc.save(res.nomeArquivo); // download local também
+    toast(`PDF salvo no histórico com ${res.total} refeições. Novas leituras até 00h atualizam o PDF sozinhas.`, 'success');
     refreshHistorico();
   } catch (err) {
     toast('Erro ao encerrar o dia: ' + (err.message || err), 'error');
